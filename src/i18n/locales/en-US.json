@@ -1,0 +1,88 @@
+{
+    "app": {
+        "name": "Canbox Manager",
+        "version": "0.1.0"
+    },
+    "nav": {
+        "apps": "My Apps",
+        "repos": "App Repos",
+        "settings": "Settings",
+        "about": "About"
+    },
+    "apps": {
+        "title": "My Apps",
+        "empty": "No apps installed yet",
+        "emptyHint": "Download from app repos or import an existing APP",
+        "import": "Import APP",
+        "importDialogTitle": "Select APP Directory",
+        "importSuccess": "APP imported successfully",
+        "importFailed": "Failed to import APP",
+        "remove": "Remove",
+        "removeConfirm": "Are you sure you want to remove this app?",
+        "removeSuccess": "APP removed",
+        "launch": "Launch",
+        "launchFailed": "Launch failed",
+        "clearData": "Clear Data",
+        "clearDataConfirm": "Are you sure you want to clear this app's data?",
+        "clearDataSuccess": "Data cleared",
+        "running": "Running",
+        "actions": "Actions"
+    },
+    "repos": {
+        "title": "App Repos",
+        "empty": "No repos added yet",
+        "emptyHint": "Add a Git repository URL to discover more apps",
+        "add": "Add Repo",
+        "addDialogTitle": "Add App Repository",
+        "url": "Repository URL",
+        "urlPlaceholder": "https://github.com/user/canbox-apps",
+        "name": "Repository Name",
+        "namePlaceholder": "Optional, auto-detected if empty",
+        "addSuccess": "Repository added",
+        "addFailed": "Failed to add repository",
+        "remove": "Remove",
+        "removeConfirm": "Are you sure you want to remove this repository?",
+        "removeSuccess": "Repository removed",
+        "sync": "Sync",
+        "lastSync": "Last synced",
+        "never": "Never synced",
+        "syncing": "Syncing..."
+    },
+    "settings": {
+        "title": "Settings",
+        "general": "General",
+        "language": "Language",
+        "languageHint": "Interface display language",
+        "autoStart": "Launch at startup",
+        "autoStartHint": "Automatically launch Canbox Manager on system startup",
+        "dataPath": "Data Directory",
+        "dataPathHint": "Application data storage location",
+        "dataPathChange": "Change",
+        "fontSize": "Font Size",
+        "logRetention": "Log Retention (days)",
+        "resetSettings": "Reset to Defaults",
+        "resetConfirm": "Are you sure you want to reset all settings to defaults?"
+    },
+    "about": {
+        "title": "About",
+        "version": "Version",
+        "coreVersion": "Canbox Core Version",
+        "platform": "Platform",
+        "nodeVersion": "Node.js Version",
+        "electronVersion": "Electron Version",
+        "chromeVersion": "Chromium Version",
+        "license": "License",
+        "author": "Author",
+        "homepage": "Homepage",
+        "checkUpdate": "Check for Updates",
+        "upToDate": "Up to date"
+    },
+    "common": {
+        "confirm": "OK",
+        "cancel": "Cancel",
+        "close": "Close",
+        "save": "Save",
+        "delete": "Delete",
+        "loading": "Loading..."
+    }
+}

@@ -1,0 +1,88 @@
+{
+    "app": {
+        "name": "Canbox Manager",
+        "version": "0.1.0"
+    },
+    "nav": {
+        "apps": "我的应用",
+        "repos": "应用仓库",
+        "settings": "设置",
+        "about": "关于"
+    },
+    "apps": {
+        "title": "我的应用",
+        "empty": "还没有安装任何应用",
+        "emptyHint": "从应用仓库下载，或导入已有的 APP",
+        "import": "导入 APP",
+        "importDialogTitle": "选择 APP 目录",
+        "importSuccess": "应用导入成功",
+        "importFailed": "应用导入失败",
+        "remove": "删除",
+        "removeConfirm": "确定要删除此应用吗？",
+        "removeSuccess": "应用已删除",
+        "launch": "启动",
+        "launchFailed": "启动失败",
+        "clearData": "清理数据",
+        "clearDataConfirm": "确定要清理此应用的数据吗？",
+        "clearDataSuccess": "数据已清理",
+        "running": "运行中",
+        "actions": "操作"
+    },
+    "repos": {
+        "title": "应用仓库",
+        "empty": "还没有添加任何仓库",
+        "emptyHint": "添加 Git 仓库地址来获取更多应用",
+        "add": "添加仓库",
+        "addDialogTitle": "添加应用仓库",
+        "url": "仓库地址",
+        "urlPlaceholder": "https://github.com/user/canbox-apps",
+        "name": "仓库名称",
+        "namePlaceholder": "可选，留空则自动获取",
+        "addSuccess": "仓库添加成功",
+        "addFailed": "仓库添加失败",
+        "remove": "删除",
+        "removeConfirm": "确定要删除此仓库吗？",
+        "removeSuccess": "仓库已删除",
+        "sync": "同步",
+        "lastSync": "上次同步",
+        "never": "从未同步",
+        "syncing": "同步中..."
+    },
+    "settings": {
+        "title": "设置",
+        "general": "通用",
+        "language": "语言",
+        "languageHint": "界面显示语言",
+        "autoStart": "开机自启",
+        "autoStartHint": "系统启动时自动运行 Canbox Manager",
+        "dataPath": "数据目录",
+        "dataPathHint": "应用数据存储位置",
+        "dataPathChange": "更改",
+        "fontSize": "字体大小",
+        "logRetention": "日志保留天数",
+        "resetSettings": "恢复默认设置",
+        "resetConfirm": "确定要恢复默认设置吗？"
+    },
+    "about": {
+        "title": "关于",
+        "version": "版本",
+        "coreVersion": "Canbox Core 版本",
+        "platform": "平台",
+        "nodeVersion": "Node.js 版本",
+        "electronVersion": "Electron 版本",
+        "chromeVersion": "Chromium 版本",
+        "license": "许可证",
+        "author": "作者",
+        "homepage": "项目主页",
+        "checkUpdate": "检查更新",
+        "upToDate": "已是最新版本"
+    },
+    "common": {
+        "confirm": "确定",
+        "cancel": "取消",
+        "close": "关闭",
+        "save": "保存",
+        "delete": "删除",
+        "loading": "加载中..."
+    }
+}
