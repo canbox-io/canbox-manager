@@ -60,6 +60,49 @@ app.component('ElInputNumber', ElInputNumber);
 app.mount('#app');
 const _tMounted = performance.now();
 
+// ====== 缩放快捷键（Ctrl+滚轮 / Ctrl++ / Ctrl+- / Ctrl+0） ======
+let currentZoom = 1.0;
+
+window.api.manager.zoomGet().then(result => {
+    if (result.success) currentZoom = result.factor;
+}).catch(() => {});
+
+function adjustZoom(delta) {
+    let newZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta));
+    newZoom = Math.round(newZoom * 10) / 10;
+    if (newZoom !== currentZoom) {
+        currentZoom = newZoom;
+        window.api.manager.zoomSet(currentZoom);
+    }
+}
+
+document.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+        e.preventDefault();
+        adjustZoom(e.deltaY > 0 ? -0.1 : 0.1);
+    }
+}, { passive: false });
+
+document.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey) return;
+    if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        adjustZoom(0.1);
+    } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        adjustZoom(-0.1);
+    } else if (e.key === '0') {
+        e.preventDefault();
+        currentZoom = 1.0;
+        window.api.manager.zoomReset();
+    }
+});
+
+// 主进程推送的 zoom 变化（如设置页调节后同步）
+window.api.manager.onZoomChanged((factor) => {
+    currentZoom = factor;
+});
+
 console.log('[renderer-timing] ===== 各阶段耗时 =====');
 console.log(`[renderer-timing] import vue             ${(_t1 - _t0).toFixed(1)}ms`);
 console.log(`[renderer-timing] import pinia           ${(_t2 - _t1).toFixed(1)}ms`);

@@ -8,13 +8,17 @@ import notification from '@/utils/notification';
 const { t, locale } = useI18n();
 const settingsStore = useSettingsStore();
 
+const zoomFactor = ref(1.0);
+
 const languages = [
     { value: 'zh-CN', label: '中文（简体）' },
     { value: 'en-US', label: 'English (US)' }
 ];
 
-onMounted(() => {
-    settingsStore.fetchSettings();
+onMounted(async () => {
+    await settingsStore.fetchSettings();
+    const result = await window.api.manager.zoomGet();
+    if (result.success) zoomFactor.value = result.factor;
 });
 
 async function handleLanguageChange(value) {
@@ -27,6 +31,21 @@ async function handleToggle(key) {
     await settingsStore.setSetting(key, newValue);
 }
 
+async function handleZoomChange(value) {
+    zoomFactor.value = value;
+    await window.api.manager.zoomSet(value);
+}
+
+async function handleZoomReset() {
+    zoomFactor.value = 1.0;
+    await window.api.manager.zoomReset();
+}
+
+// 监听主进程推送的 zoom 变化（快捷键调节后同步 UI）
+window.api.manager.onZoomChanged((factor) => {
+    zoomFactor.value = factor;
+});
+
 async function handleReset() {
     try {
         await ElMessageBox.confirm(
@@ -34,18 +53,17 @@ async function handleReset() {
             t('settings.resetSettings'),
             { type: 'warning' }
         );
-        // 重置为默认值
         const defaults = {
             language: 'zh-CN',
             autoStart: false,
             fontSize: 14,
-            zoomFactor: 1.0,
             logRetention: 30
         };
         for (const [key, value] of Object.entries(defaults)) {
             await settingsStore.setSetting(key, value);
         }
         locale.value = 'zh-CN';
+        await handleZoomReset();
         notification.success('Settings reset to defaults');
     } catch (e) {
         // 用户取消
@@ -111,6 +129,20 @@ async function handleReset() {
                         :max="24"
                         size="default"
                     />
+                </div>
+
+                <!-- 缩放比例 -->
+                <div class="setting-item">
+                    <div class="setting-label">
+                        <span class="label-text">{{ $t('settings.zoom') }}</span>
+                        <span class="label-hint">{{ $t('settings.zoomHint') }}</span>
+                    </div>
+                    <div class="zoom-control">
+                        <el-button size="small" @click="handleZoomChange(Math.max(0.5, zoomFactor - 0.1))">-</el-button>
+                        <span class="zoom-value">{{ zoomFactor.toFixed(1) }}x</span>
+                        <el-button size="small" @click="handleZoomChange(Math.min(2.0, zoomFactor + 0.1))">+</el-button>
+                        <el-button size="small" plain @click="handleZoomReset">{{ $t('settings.zoomReset') }}</el-button>
+                    </div>
                 </div>
 
                 <!-- 日志保留 -->
@@ -199,5 +231,18 @@ async function handleReset() {
 
 .settings-footer {
     margin-top: 20px;
+}
+
+.zoom-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.zoom-value {
+    min-width: 40px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--el-text-color-primary);
 }
 </style>

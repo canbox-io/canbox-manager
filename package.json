@@ -6,7 +6,7 @@
     "license": "Apache-2.0",
     "author": "lizl6",
     "scripts": {
-        "dev": "vite --host 0.0.0.0 --port 12334",
+        "dev": "vite --host 0.0.0.0 --port 5101",
         "build": "vite build",
         "start": "NODE_ENV=development electron -r /depot/cargo/canbox-core/injection.js . --no-sandbox"
     },

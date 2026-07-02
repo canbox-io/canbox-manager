@@ -28,7 +28,7 @@ export default defineConfig({
         }
     },
     server: {
-        port: 12334,
+        port: 5101,
         strictPort: true,
         warmup: {
             clientFiles: [

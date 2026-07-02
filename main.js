@@ -8,6 +8,11 @@
  * 注册 manager 专用 IPC handlers（APP 管理、仓库管理、设置）。
  */
 
+// 开发模式关闭 Electron 安全警告（CSP 提示等，打包后自动不显示）
+if (process.env.NODE_ENV === 'development') {
+    process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+}
+
 console.time('[startup] main.js 模块加载到 window-ready 总耗时');
 
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
@@ -61,6 +66,9 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
     }
 
     let tempDir = null;
+    // 临时禁用 asar 补丁：解压时遇到 .asar 文件，Electron 修补的 fs 会将其视为归档导致 chmod/stat 失败
+    const prevNoAsar = process.noAsar;
+    process.noAsar = true;
     try {
         const AdmZip = require('adm-zip');
         const zip = new AdmZip(zipPath);
@@ -90,6 +98,7 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
     } catch (e) {
         return { success: false, error: e.message };
     } finally {
+        process.noAsar = prevNoAsar;
         if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
     }
 });
@@ -271,6 +280,41 @@ ipcMain.handle('manager.fileTask.list', async () => {
     return tasks;
 });
 
+// -- 缩放 --
+ipcMain.handle('manager.zoom.get', async () => {
+    const data = readSettings();
+    return { success: true, factor: data['manager.zoomFactor'] || 1.0 };
+});
+
+ipcMain.handle('manager.zoom.set', async (_e, factor) => {
+    const clamped = Math.max(0.5, Math.min(2.0, Math.round(factor * 10) / 10));
+    const data = readSettings();
+    data['manager.zoomFactor'] = clamped;
+    writeSettings(data);
+
+    BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) {
+            win.webContents.setZoomFactor(clamped);
+            win.webContents.send('manager:zoomChanged', clamped);
+        }
+    });
+    return { success: true, factor: clamped };
+});
+
+ipcMain.handle('manager.zoom.reset', async () => {
+    const data = readSettings();
+    data['manager.zoomFactor'] = 1.0;
+    writeSettings(data);
+
+    BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) {
+            win.webContents.setZoomFactor(1.0);
+            win.webContents.send('manager:zoomChanged', 1.0);
+        }
+    });
+    return { success: true, factor: 1.0 };
+});
+
 // ====== 窗口创建 ======
 
 function createWindow() {
@@ -330,12 +374,26 @@ function createWindow() {
     console.log(`[startup] 模式: ${isDev ? '开发 (loadURL)' : '生产 (loadFile)'}`);
 
     if (isDev) {
-        mainWindow.loadURL('http://localhost:12334');
+        mainWindow.loadURL('http://localhost:5101');
         // mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
         mainWindow.webContents.openDevTools({ mode: 'detach' });
     } else {
         mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
     }
+
+    // 应用保存的缩放比例（dom-ready 后设置，避免闪烁）
+    mainWindow.webContents.on('dom-ready', () => {
+        try {
+            const data = readSettings();
+            const zoomFactor = data['manager.zoomFactor'] || 1.0;
+            if (zoomFactor !== 1.0) {
+                mainWindow.webContents.setZoomFactor(zoomFactor);
+                console.log(`[startup] Applied zoom factor: ${zoomFactor}`);
+            }
+        } catch (e) {
+            // 忽略
+        }
+    });
 }
 
 /**

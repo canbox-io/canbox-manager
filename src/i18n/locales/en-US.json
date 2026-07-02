@@ -59,6 +59,9 @@
         "dataPathHint": "Application data storage location",
         "dataPathChange": "Change",
         "fontSize": "Font Size",
+        "zoom": "Zoom Level",
+        "zoomHint": "Ctrl+Wheel or Ctrl++/- to adjust",
+        "zoomReset": "Reset",
         "logRetention": "Log Retention (days)",
         "resetSettings": "Reset to Defaults",
         "resetConfirm": "Are you sure you want to reset all settings to defaults?"

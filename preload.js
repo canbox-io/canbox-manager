@@ -82,6 +82,14 @@ const api = {
         fileTaskCancel: (taskId) => ipcRenderer.invoke('manager.fileTask.cancel', taskId),
         fileTaskList: () => ipcRenderer.invoke('manager.fileTask.list'),
 
+        // 缩放
+        zoomGet: () => ipcRenderer.invoke('manager.zoom.get'),
+        zoomSet: (factor) => ipcRenderer.invoke('manager.zoom.set', factor),
+        zoomReset: () => ipcRenderer.invoke('manager.zoom.reset'),
+        onZoomChanged: (callback) => {
+            ipcRenderer.on('manager:zoomChanged', (_e, factor) => callback(factor));
+        },
+
         // 事件监听
         appReady: () => ipcRenderer.invoke('manager.appReady'),
         onAppLaunched: (callback) => {
