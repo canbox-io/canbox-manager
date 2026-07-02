@@ -51,58 +51,47 @@ ipcMain.handle('manager.apps.list', async () => {
     return apps;
 });
 
-ipcMain.handle('manager.apps.import', async (_e, appPath) => {
+ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
     const userData = app.getPath('userData');
     const appsDir = path.join(userData, 'apps');
     const os = require('os');
-    let sourcePath = appPath;
+
+    if (!zipPath.toLowerCase().endsWith('.zip')) {
+        return { success: false, error: 'Only .zip packages are supported' };
+    }
+
     let tempDir = null;
+    try {
+        const AdmZip = require('adm-zip');
+        const zip = new AdmZip(zipPath);
+        tempDir = path.join(os.tmpdir(), `canbox-import-${Date.now()}`);
+        zip.extractAllTo(tempDir, true);
 
-    // 如果是 .zip 文件，解压到临时目录
-    if (appPath.toLowerCase().endsWith('.zip')) {
-        try {
-            const AdmZip = require('adm-zip');
-            const zip = new AdmZip(appPath);
-            tempDir = path.join(os.tmpdir(), `canbox-import-${Date.now()}`);
-            zip.extractAllTo(tempDir, true);
-
-            // 查找 package.json — 可能在子目录（GitHub 的 zip 会套一层目录）
-            sourcePath = findAppDir(tempDir);
-            if (!sourcePath) {
-                // 清理临时目录
-                fs.rmSync(tempDir, { recursive: true, force: true });
-                return { success: false, error: 'Invalid APP zip: no package.json found' };
-            }
-        } catch (e) {
-            if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
-            return { success: false, error: `Failed to extract zip: ${e.message}` };
+        // 查找 package.json — 可能在子目录（GitHub 的 zip 会套一层目录）
+        const sourcePath = findAppDir(tempDir);
+        if (!sourcePath) {
+            return { success: false, error: 'Invalid APP zip: no package.json found' };
         }
-    }
 
-    // 验证 APP 目录
-    const pkgPath = path.join(sourcePath, 'package.json');
-    if (!fs.existsSync(pkgPath)) {
+        const pkgPath = path.join(sourcePath, 'package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        const appId = pkg.name;
+        const destPath = path.join(appsDir, appId);
+
+        if (fs.existsSync(destPath)) {
+            return { success: false, error: 'APP already installed' };
+        }
+
+        // 复制 APP 目录
+        fs.mkdirSync(destPath, { recursive: true });
+        copyDirSync(sourcePath, destPath);
+
+        return { success: true, appId };
+    } catch (e) {
+        return { success: false, error: e.message };
+    } finally {
         if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
-        return { success: false, error: 'Not a valid Canbox APP (no package.json)' };
     }
-
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-    const appId = pkg.name;
-    const destPath = path.join(appsDir, appId);
-
-    if (fs.existsSync(destPath)) {
-        if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
-        return { success: false, error: 'APP already installed' };
-    }
-
-    // 复制 APP 目录
-    fs.mkdirSync(destPath, { recursive: true });
-    copyDirSync(sourcePath, destPath);
-
-    // 清理临时目录
-    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
-
-    return { success: true, appId };
 });
 
 ipcMain.handle('manager.apps.remove', async (_e, appId) => {
@@ -343,6 +332,7 @@ function createWindow() {
     if (isDev) {
         mainWindow.loadURL('http://localhost:12334');
         // mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
     } else {
         mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
     }

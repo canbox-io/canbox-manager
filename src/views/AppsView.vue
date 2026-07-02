@@ -13,27 +13,14 @@ onMounted(() => {
     appsStore.fetchApps();
 });
 
-async function handleImportZip() {
+async function handleImport() {
     try {
         const result = await window.api.dialog.showOpenDialog({
             properties: ['openFile'],
             filters: [
                 { name: 'Canbox APP 压缩包', extensions: ['zip'] }
             ],
-            title: t('apps.importZipTitle')
-        });
-        if (result.canceled || !result.filePaths.length) return;
-        await doImport(result.filePaths[0]);
-    } catch (e) {
-        notification.error(e.message || t('apps.importFailed'));
-    }
-}
-
-async function handleImportDir() {
-    try {
-        const result = await window.api.dialog.showOpenDialog({
-            properties: ['openDirectory'],
-            title: t('apps.importDirTitle')
+            title: t('apps.importTitle')
         });
         if (result.canceled || !result.filePaths.length) return;
         await doImport(result.filePaths[0]);
@@ -108,14 +95,9 @@ function isRunning(appId) {
     <div class="view-container">
         <div class="view-header">
             <h2 class="view-title">{{ $t('apps.title') }}</h2>
-            <el-button-group>
-                <el-button type="primary" @click="handleImportZip" :loading="importing">
-                    📦 {{ $t('apps.importZip') }}
-                </el-button>
-                <el-button type="primary" @click="handleImportDir" :loading="importing" plain>
-                    📁 {{ $t('apps.importDir') }}
-                </el-button>
-            </el-button-group>
+            <el-button type="primary" @click="handleImport" :loading="importing">
+                📦 {{ $t('apps.import') }}
+            </el-button>
         </div>
 
         <div v-if="appsStore.loading" class="loading-state">
