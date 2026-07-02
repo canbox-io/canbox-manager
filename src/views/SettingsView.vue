@@ -18,8 +18,8 @@ onMounted(() => {
 });
 
 async function handleLanguageChange(value) {
-    locale.value = value;
     await settingsStore.setSetting('language', value);
+    locale.value = value;
 }
 
 async function handleToggle(key) {

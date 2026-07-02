@@ -1,11 +1,12 @@
 <script setup>
 import { useRouter, useRoute } from 'vue-router';
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 
 const router = useRouter();
 const route = useRoute();
 const settingsStore = useSettingsStore();
+const sidebarExpanded = ref(false);
 
 const navItems = [
     { path: '/', emoji: '⊞', label: 'nav.apps' },
@@ -15,6 +16,7 @@ const navItems = [
 ];
 
 const activeNav = computed(() => route.path);
+const sidebarWidth = computed(() => sidebarExpanded.value ? '172px' : '64px');
 
 function navigate(item) {
     router.push(item.path);
@@ -27,8 +29,8 @@ onMounted(() => {
 
 <template>
     <el-container class="app-container">
-        <el-aside width="64px" class="app-sidebar">
-            <div class="sidebar-logo">
+        <el-aside :width="sidebarWidth" class="app-sidebar" :class="{ expanded: sidebarExpanded }">
+            <div class="sidebar-logo" @click="sidebarExpanded = !sidebarExpanded">
                 <span class="sidebar-emoji sidebar-emoji--lg">📦</span>
             </div>
             <nav class="sidebar-nav">
@@ -41,10 +43,17 @@ onMounted(() => {
                     @click="navigate(item)"
                 >
                     <span class="sidebar-emoji">{{ item.emoji }}</span>
+                    <span v-show="sidebarExpanded" class="nav-label">{{ $t(item.label) }}</span>
                 </div>
             </nav>
             <div class="sidebar-footer">
-                <span class="sidebar-emoji sidebar-emoji--sm">👤</span>
+                <div
+                    class="sidebar-toggle"
+                    :title="sidebarExpanded ? '收起菜单' : '展开菜单'"
+                    @click="sidebarExpanded = !sidebarExpanded"
+                >
+                    <span class="sidebar-emoji sidebar-emoji--sm">{{ sidebarExpanded ? '◀' : '▶' }}</span>
+                </div>
             </div>
         </el-aside>
 
@@ -68,12 +77,23 @@ onMounted(() => {
     border-right: 1px solid var(--el-border-color-light);
     padding-top: 12px;
     padding-bottom: 12px;
+    transition: width 0.2s ease;
     -webkit-app-region: drag;
+    overflow: hidden;
+}
+
+.app-sidebar.expanded {
+    align-items: stretch;
 }
 
 .sidebar-logo {
+    display: flex;
+    justify-content: center;
+    align-items: center;
     margin-bottom: 24px;
     color: var(--el-color-primary);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
 }
 
 .sidebar-nav {
@@ -82,6 +102,11 @@ onMounted(() => {
     flex-direction: column;
     align-items: center;
     gap: 4px;
+}
+
+.app-sidebar.expanded .sidebar-nav {
+    align-items: stretch;
+    padding: 0 8px;
 }
 
 .nav-item {
@@ -97,6 +122,13 @@ onMounted(() => {
     -webkit-app-region: no-drag;
 }
 
+.app-sidebar.expanded .nav-item {
+    width: 100%;
+    justify-content: flex-start;
+    padding-left: 10px;
+    gap: 10px;
+}
+
 .nav-item:hover {
     background-color: var(--el-fill-color-light);
     color: var(--el-text-color-primary);
@@ -107,9 +139,33 @@ onMounted(() => {
     color: var(--el-color-primary);
 }
 
+.nav-label {
+    font-size: 14px;
+    white-space: nowrap;
+}
+
 .sidebar-footer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
     -webkit-app-region: no-drag;
+}
+
+.sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
     color: var(--el-text-color-placeholder);
+    transition: all 0.2s ease;
+}
+
+.sidebar-toggle:hover {
+    background-color: var(--el-fill-color-light);
+    color: var(--el-text-color-primary);
 }
 
 .app-main {

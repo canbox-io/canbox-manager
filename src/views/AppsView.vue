@@ -13,16 +13,39 @@ onMounted(() => {
     appsStore.fetchApps();
 });
 
-async function handleImport() {
+async function handleImportZip() {
+    try {
+        const result = await window.api.dialog.showOpenDialog({
+            properties: ['openFile'],
+            filters: [
+                { name: 'Canbox APP 压缩包', extensions: ['zip'] }
+            ],
+            title: t('apps.importZipTitle')
+        });
+        if (result.canceled || !result.filePaths.length) return;
+        await doImport(result.filePaths[0]);
+    } catch (e) {
+        notification.error(e.message || t('apps.importFailed'));
+    }
+}
+
+async function handleImportDir() {
     try {
         const result = await window.api.dialog.showOpenDialog({
             properties: ['openDirectory'],
-            title: t('apps.importDialogTitle')
+            title: t('apps.importDirTitle')
         });
         if (result.canceled || !result.filePaths.length) return;
+        await doImport(result.filePaths[0]);
+    } catch (e) {
+        notification.error(e.message || t('apps.importFailed'));
+    }
+}
 
+async function doImport(appPath) {
+    try {
         importing.value = true;
-        const res = await appsStore.importApp(result.filePaths[0]);
+        const res = await appsStore.importApp(appPath);
         if (res.success) {
             notification.success(t('apps.importSuccess'));
         } else {
@@ -85,9 +108,14 @@ function isRunning(appId) {
     <div class="view-container">
         <div class="view-header">
             <h2 class="view-title">{{ $t('apps.title') }}</h2>
-            <el-button type="primary" @click="handleImport" :loading="importing">
-                📥 {{ $t('apps.import') }}
-            </el-button>
+            <el-button-group>
+                <el-button type="primary" @click="handleImportZip" :loading="importing">
+                    📦 {{ $t('apps.importZip') }}
+                </el-button>
+                <el-button type="primary" @click="handleImportDir" :loading="importing" plain>
+                    📁 {{ $t('apps.importDir') }}
+                </el-button>
+            </el-button-group>
         </div>
 
         <div v-if="appsStore.loading" class="loading-state">

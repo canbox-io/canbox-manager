@@ -67,14 +67,15 @@ html, body {
 
 /* 侧边栏 emoji 图标 */
 .sidebar-emoji {
-    font-size: 20px;
+    font-size: 24px;
     line-height: 1;
+    flex-shrink: 0;
 }
 .sidebar-emoji--lg {
-    font-size: 26px;
+    font-size: 28px;
 }
 .sidebar-emoji--sm {
-    font-size: 16px;
+    font-size: 20px;
 }
 
 /* 卡片内 emoji */
