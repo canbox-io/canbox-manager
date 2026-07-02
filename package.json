@@ -1,0 +1,26 @@
+{
+    "name": "canbox-manager",
+    "version": "0.1.0",
+    "description": "Canbox 管理器 APP — APP 注册管理、仓库管理、系统设置",
+    "main": "main.js",
+    "license": "Apache-2.0",
+    "author": "lizl6",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "start": "electron ."
+    },
+    "dependencies": {
+        "vue": "^3.4.21",
+        "vue-router": "^4.4.5",
+        "pinia": "^3.0.3",
+        "element-plus": "^2.8.3",
+        "vue-i18n": "^11.2.8",
+        "pinyin-pro": "^1.5.5"
+    },
+    "devDependencies": {
+        "vite": "^5.4.6",
+        "@vitejs/plugin-vue": "^5.1.2",
+        "electron": "^41.2.1"
+    }
+}
