@@ -8,7 +8,7 @@
  * 注册 manager 专用 IPC handlers（APP 管理、仓库管理、设置）。
  *
  * 注意：canbox-core 的 injection.js 已完成环境初始化（userData、Users 路径、
- * store/db IPC 注册），本文件通过 require('canbox-core') 获取 env 信息。
+ * store/db IPC 注册），本文件通过 global.__CANBOX_ENV__ 获取 env 信息。
  */
 
 // 开发模式关闭 Electron 安全警告（CSP 提示等，打包后自动不显示）
@@ -23,9 +23,11 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
-// 获取 canbox-core 注入的环境信息（injection.js 的 module.exports）
-const core = require('canbox-core');
-const USERS_PATH = core.usersPath;
+// 获取 canbox-core 注入的环境信息（injection.js 通过 -r 预加载时挂到 global）
+const env = global.__CANBOX_ENV__;
+const USERS_PATH = env.usersPath;
+// canbox-core 根目录路径（用于 require store 等模块）
+const CORE_PATH = global.__CANBOX_CORE_PATH__;
 
 let mainWindow = null;
 
@@ -178,7 +180,7 @@ ipcMain.handle('manager.repos.list', async () => {
     try {
         // manager 作为普通 APP，用 canbox.store 访问自己的数据
         // 这里在主进程中直接用 core 的 store 模块
-        const store = require('canbox-core/lib/store');
+        const store = require(path.join(CORE_PATH, 'lib', 'store'));
         const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
         const list = reposStore.get('list') || [];
         return list;
@@ -189,7 +191,7 @@ ipcMain.handle('manager.repos.list', async () => {
 
 ipcMain.handle('manager.repos.add', async (_e, url, options) => {
     try {
-        const store = require('canbox-core/lib/store');
+        const store = require(path.join(CORE_PATH, 'lib', 'store'));
         const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
         const list = reposStore.get('list') || [];
 
@@ -210,7 +212,7 @@ ipcMain.handle('manager.repos.add', async (_e, url, options) => {
 
 ipcMain.handle('manager.repos.remove', async (_e, repoId) => {
     try {
-        const store = require('canbox-core/lib/store');
+        const store = require(path.join(CORE_PATH, 'lib', 'store'));
         const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
         let list = reposStore.get('list') || [];
         list = list.filter(r => r.id !== repoId);
@@ -230,20 +232,20 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
 // manager 设置存到 data/canbox-manager/store/settings.json
 
 ipcMain.handle('manager.settings.get', async (_e, key) => {
-    const store = require('canbox-core/lib/store');
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
     const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
     return settingsStore.get(key);
 });
 
 ipcMain.handle('manager.settings.set', async (_e, key, value) => {
-    const store = require('canbox-core/lib/store');
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
     const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
     settingsStore.set(key, value);
     return { success: true };
 });
 
 ipcMain.handle('manager.settings.getAll', async () => {
-    const store = require('canbox-core/lib/store');
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
     const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
     // electron-store 的 store 没有直接 getAll，用 size + 遍历
     return settingsStore.store || {};
@@ -277,14 +279,14 @@ ipcMain.handle('manager.fileTask.list', async () => {
 
 // -- 缩放 --
 ipcMain.handle('manager.zoom.get', async () => {
-    const store = require('canbox-core/lib/store');
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
     const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
     return { success: true, factor: settingsStore.get('zoomFactor') || 1.0 };
 });
 
 ipcMain.handle('manager.zoom.set', async (_e, factor) => {
     const clamped = Math.max(0.5, Math.min(2.0, Math.round(factor * 10) / 10));
-    const store = require('canbox-core/lib/store');
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
     const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
     settingsStore.set('zoomFactor', clamped);
 
@@ -298,7 +300,7 @@ ipcMain.handle('manager.zoom.set', async (_e, factor) => {
 });
 
 ipcMain.handle('manager.zoom.reset', async () => {
-    const store = require('canbox-core/lib/store');
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
     const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
     settingsStore.set('zoomFactor', 1.0);
 
@@ -323,6 +325,7 @@ function createWindow() {
         minHeight: 600,
         title: 'Canbox Manager',
         show: false,
+        icon: path.join(__dirname, 'logo.png'),
         backgroundColor: '#f7f8fa',
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -347,7 +350,7 @@ function createWindow() {
     // 应用保存的缩放比例（dom-ready 后设置，避免闪烁）
     mainWindow.webContents.on('dom-ready', () => {
         try {
-            const store = require('canbox-core/lib/store');
+            const store = require(path.join(CORE_PATH, 'lib', 'store'));
             const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
             const zoomFactor = settingsStore.get('zoomFactor') || 1.0;
             if (zoomFactor !== 1.0) {
