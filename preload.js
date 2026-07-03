@@ -3,6 +3,10 @@
  *
  * 通过 contextBridge 暴露 canbox-core API 给渲染进程。
  * 同时注册 manager 专用 IPC 通道。
+ *
+ * canbox-core API 签名（黑盒式，APP 不传 appId，由 core 自动路由）：
+ *   store: get(name, key) / set(name, key, value) / delete(name, key) / clear(name)
+ *   db: put(doc) / get(docId) / allDocs(options) / bulkDocs(docs) / remove(doc) / find(query) / createIndex(index)
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
@@ -13,16 +17,16 @@ const api = {
         get: (name, key) => ipcRenderer.invoke('canbox.store.get', name, key),
         set: (name, key, value) => ipcRenderer.invoke('canbox.store.set', name, key, value),
         delete: (name, key) => ipcRenderer.invoke('canbox.store.delete', name, key),
-        has: (name, key) => ipcRenderer.invoke('canbox.store.has', name, key)
+        clear: (name) => ipcRenderer.invoke('canbox.store.clear', name)
     },
     db: {
-        put: (dbName, doc) => ipcRenderer.invoke('canbox.db.put', dbName, doc),
-        get: (dbName, docId) => ipcRenderer.invoke('canbox.db.get', dbName, docId),
-        allDocs: (dbName, options) => ipcRenderer.invoke('canbox.db.allDocs', dbName, options),
-        bulkDocs: (dbName, docs) => ipcRenderer.invoke('canbox.db.bulkDocs', dbName, docs),
-        remove: (dbName, doc) => ipcRenderer.invoke('canbox.db.remove', dbName, doc),
-        find: (dbName, query) => ipcRenderer.invoke('canbox.db.find', dbName, query),
-        createIndex: (dbName, index) => ipcRenderer.invoke('canbox.db.createIndex', dbName, index)
+        put: (doc) => ipcRenderer.invoke('canbox.db.put', doc),
+        get: (docId) => ipcRenderer.invoke('canbox.db.get', docId),
+        allDocs: (options) => ipcRenderer.invoke('canbox.db.allDocs', options),
+        bulkDocs: (docs) => ipcRenderer.invoke('canbox.db.bulkDocs', docs),
+        remove: (doc) => ipcRenderer.invoke('canbox.db.remove', doc),
+        find: (query) => ipcRenderer.invoke('canbox.db.find', query),
+        createIndex: (index) => ipcRenderer.invoke('canbox.db.createIndex', index)
     },
     dialog: {
         showMessageBox: (options) => ipcRenderer.invoke('canbox.dialog.showMessageBox', options),
@@ -49,6 +53,7 @@ const api = {
         openUrl: (url) => ipcRenderer.invoke('canbox.misc.openUrl', url),
         getUserData: () => ipcRenderer.invoke('canbox.misc.getUserData'),
         getCoreVersion: () => ipcRenderer.invoke('canbox.misc.getCoreVersion'),
+        getCorePath: () => ipcRenderer.invoke('canbox.misc.getCorePath'),
         getPlatformInfo: () => ipcRenderer.invoke('canbox.misc.getPlatformInfo'),
         showItemInFolder: (filePath) => ipcRenderer.invoke('canbox.misc.showItemInFolder', filePath),
         openPath: (filePath) => ipcRenderer.invoke('canbox.misc.openPath', filePath)
@@ -63,14 +68,12 @@ const api = {
         appsLaunch: (appId) => ipcRenderer.invoke('manager.apps.launch', appId),
         appsGetRunning: () => ipcRenderer.invoke('manager.apps.getRunning'),
         appsClearData: (appId) => ipcRenderer.invoke('manager.apps.clearData', appId),
-        appsRefresh: (appId) => ipcRenderer.invoke('manager.apps.refresh', appId),
 
         // 仓库管理
         reposList: () => ipcRenderer.invoke('manager.repos.list'),
         reposAdd: (url, options) => ipcRenderer.invoke('manager.repos.add', url, options),
         reposRemove: (repoId) => ipcRenderer.invoke('manager.repos.remove', repoId),
         reposSync: (repoId) => ipcRenderer.invoke('manager.repos.sync', repoId),
-        reposGetApps: (repoId) => ipcRenderer.invoke('manager.repos.getApps', repoId),
 
         // 设置
         settingsGet: (key) => ipcRenderer.invoke('manager.settings.get', key),
@@ -91,16 +94,7 @@ const api = {
         },
 
         // 事件监听
-        appReady: () => ipcRenderer.invoke('manager.appReady'),
-        onAppLaunched: (callback) => {
-            ipcRenderer.on('manager:appLaunched', (_e, data) => callback(data));
-        },
-        onAppStopped: (callback) => {
-            ipcRenderer.on('manager:appStopped', (_e, data) => callback(data));
-        },
-        onFileTaskProgress: (callback) => {
-            ipcRenderer.on('manager:fileTaskProgress', (_e, data) => callback(data));
-        }
+        appReady: () => ipcRenderer.invoke('manager.appReady')
     }
 };
 

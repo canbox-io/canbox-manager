@@ -2,10 +2,13 @@
  * canbox-manager — App 主进程入口
  *
  * 标准 Electron APP，通过 canbox-core 注入启动：
- *   electron -r canbox-core/injection.js canbox-manager/
+ *   electron -r canbox-core/injection.js canbox-manager/ --app-id=canbox-manager
  *
  * 与普通 APP 无区别，不拥有特殊权限。
  * 注册 manager 专用 IPC handlers（APP 管理、仓库管理、设置）。
+ *
+ * 注意：canbox-core 的 injection.js 已完成环境初始化（userData、Users 路径、
+ * store/db IPC 注册），本文件通过 require('canbox-core') 获取 env 信息。
  */
 
 // 开发模式关闭 Electron 安全警告（CSP 提示等，打包后自动不显示）
@@ -20,14 +23,17 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
+// 获取 canbox-core 注入的环境信息（injection.js 的 module.exports）
+const core = require('canbox-core');
+const USERS_PATH = core.usersPath;
+
 let mainWindow = null;
 
 // ====== Manager 专用 IPC Handlers ======
 
 // -- APP 管理 --
 ipcMain.handle('manager.apps.list', async () => {
-    const userData = app.getPath('userData');
-    const appsDir = path.join(userData, 'apps');
+    const appsDir = path.join(USERS_PATH, 'apps');
     if (!fs.existsSync(appsDir)) return [];
 
     const entries = fs.readdirSync(appsDir, { withFileTypes: true });
@@ -57,8 +63,7 @@ ipcMain.handle('manager.apps.list', async () => {
 });
 
 ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
-    const userData = app.getPath('userData');
-    const appsDir = path.join(userData, 'apps');
+    const appsDir = path.join(USERS_PATH, 'apps');
     const os = require('os');
 
     if (!zipPath.toLowerCase().endsWith('.zip')) {
@@ -104,8 +109,7 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
 });
 
 ipcMain.handle('manager.apps.remove', async (_e, appId) => {
-    const userData = app.getPath('userData');
-    const appPath = path.join(userData, 'apps', appId);
+    const appPath = path.join(USERS_PATH, 'apps', appId);
 
     if (!fs.existsSync(appPath)) {
         return { success: false, error: 'APP not found' };
@@ -116,18 +120,26 @@ ipcMain.handle('manager.apps.remove', async (_e, appId) => {
 });
 
 ipcMain.handle('manager.apps.launch', async (_e, appId) => {
-    const userData = app.getPath('userData');
-    const appPath = path.join(userData, 'apps', appId);
-    const coreInjection = path.resolve(app.getAppPath(), '..', 'canbox-core', 'injection.js');
+    const appPath = path.join(USERS_PATH, 'apps', appId);
 
     if (!fs.existsSync(appPath)) {
         return { success: false, error: 'APP not found' };
     }
 
     try {
+        // 从 {Users}/canbox.json 读取 canbox-core 路径（injection.js 注入时写入）
+        const Store = require('electron-store');
+        const coreStore = new Store({ cwd: USERS_PATH, name: 'canbox' });
+        const corePath = coreStore.get('core.injectionPath');
+        if (!corePath) {
+            return { success: false, error: 'canbox-core path not found in canbox.json' };
+        }
+        const coreInjection = path.join(corePath, 'injection.js');
+
         const child = spawn(process.execPath, [
             '-r', coreInjection,
-            appPath
+            appPath,
+            `--app-id=${appId}`
         ], {
             detached: true,
             stdio: 'ignore'
@@ -141,18 +153,11 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
 });
 
 ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
-    const userData = app.getPath('userData');
-    const db = require(path.resolve(app.getAppPath(), '..', 'canbox-core', 'lib', 'db')).get(userData);
+    const dataDir = path.join(USERS_PATH, 'data', appId);
 
     try {
-        // 清除 APP 在 apps 数据库中的数据
-        const result = await db.apps.find({
-            selector: { appId }
-        });
-        if (result.docs) {
-            for (const doc of result.docs) {
-                await db.apps.remove(doc);
-            }
+        if (fs.existsSync(dataDir)) {
+            fs.rmSync(dataDir, { recursive: true, force: true });
         }
         return { success: true };
     } catch (e) {
@@ -160,35 +165,43 @@ ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
     }
 });
 
-// -- 仓库管理 --
-ipcMain.handle('manager.repos.list', async () => {
-    const userData = app.getPath('userData');
-    const db = require(path.resolve(app.getAppPath(), '..', 'canbox-core', 'lib', 'db')).get(userData);
+ipcMain.handle('manager.apps.getRunning', async () => {
+    // TODO: 进程管理待实现
+    return [];
+});
 
+// -- 仓库管理 --
+// 仓库元数据存储在 manager 自己的 store 中（data/canbox-manager/store/repos.json）
+// 通过 core store IPC 访问（黑盒式，appId=canbox-manager 自动路由）
+
+ipcMain.handle('manager.repos.list', async () => {
     try {
-        const result = await db.core.find({
-            selector: { type: 'repo' }
-        });
-        return result.docs || [];
+        // manager 作为普通 APP，用 canbox.store 访问自己的数据
+        // 这里在主进程中直接用 core 的 store 模块
+        const store = require('canbox-core/lib/store');
+        const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
+        const list = reposStore.get('list') || [];
+        return list;
     } catch (e) {
         return [];
     }
 });
 
 ipcMain.handle('manager.repos.add', async (_e, url, options) => {
-    const userData = app.getPath('userData');
-    const db = require(path.resolve(app.getAppPath(), '..', 'canbox-core', 'lib', 'db')).get(userData);
-
     try {
+        const store = require('canbox-core/lib/store');
+        const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
+        const list = reposStore.get('list') || [];
+
         const doc = {
-            _id: `repo_${Date.now()}`,
-            type: 'repo',
+            id: `repo_${Date.now()}`,
             url,
             name: (options && options.name) || url,
             createdAt: Date.now(),
             updatedAt: Date.now()
         };
-        await db.core.put(doc);
+        list.push(doc);
+        reposStore.set('list', list);
         return { success: true, repo: doc };
     } catch (e) {
         return { success: false, error: e.message };
@@ -196,62 +209,44 @@ ipcMain.handle('manager.repos.add', async (_e, url, options) => {
 });
 
 ipcMain.handle('manager.repos.remove', async (_e, repoId) => {
-    const userData = app.getPath('userData');
-    const db = require(path.resolve(app.getAppPath(), '..', 'canbox-core', 'lib', 'db')).get(userData);
-
     try {
-        const doc = await db.core.get(repoId);
-        await db.core.remove(doc);
+        const store = require('canbox-core/lib/store');
+        const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
+        let list = reposStore.get('list') || [];
+        list = list.filter(r => r.id !== repoId);
+        reposStore.set('list', list);
         return { success: true };
     } catch (e) {
         return { success: false, error: e.message };
     }
 });
 
-// -- 设置（JSON 文件存储） --
-function getSettingsPath() {
-    return path.join(app.getPath('userData'), 'canbox.json');
-}
+ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
+    // TODO: 仓库同步待实现
+    return { success: false, error: 'Not implemented yet' };
+});
 
-function readSettings() {
-    const filePath = getSettingsPath();
-    try {
-        if (fs.existsSync(filePath)) {
-            return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        }
-    } catch (e) {
-        // 损坏的配置按空处理
-    }
-    return {};
-}
-
-function writeSettings(data) {
-    const filePath = getSettingsPath();
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-}
+// -- 设置（通过 canbox-core store，黑盒式，appId=canbox-manager 自动路由） --
+// manager 设置存到 data/canbox-manager/store/settings.json
 
 ipcMain.handle('manager.settings.get', async (_e, key) => {
-    const data = readSettings();
-    return data[`manager.${key}`];
+    const store = require('canbox-core/lib/store');
+    const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
+    return settingsStore.get(key);
 });
 
 ipcMain.handle('manager.settings.set', async (_e, key, value) => {
-    const data = readSettings();
-    data[`manager.${key}`] = value;
-    writeSettings(data);
+    const store = require('canbox-core/lib/store');
+    const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
+    settingsStore.set(key, value);
     return { success: true };
 });
 
 ipcMain.handle('manager.settings.getAll', async () => {
-    const data = readSettings();
-    const result = {};
-    for (const [key, value] of Object.entries(data)) {
-        if (key.startsWith('manager.')) {
-            result[key.slice(8)] = value;
-        }
-    }
-    return result;
+    const store = require('canbox-core/lib/store');
+    const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
+    // electron-store 的 store 没有直接 getAll，用 size + 遍历
+    return settingsStore.store || {};
 });
 
 // -- 文件任务 --
@@ -282,15 +277,16 @@ ipcMain.handle('manager.fileTask.list', async () => {
 
 // -- 缩放 --
 ipcMain.handle('manager.zoom.get', async () => {
-    const data = readSettings();
-    return { success: true, factor: data['manager.zoomFactor'] || 1.0 };
+    const store = require('canbox-core/lib/store');
+    const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
+    return { success: true, factor: settingsStore.get('zoomFactor') || 1.0 };
 });
 
 ipcMain.handle('manager.zoom.set', async (_e, factor) => {
     const clamped = Math.max(0.5, Math.min(2.0, Math.round(factor * 10) / 10));
-    const data = readSettings();
-    data['manager.zoomFactor'] = clamped;
-    writeSettings(data);
+    const store = require('canbox-core/lib/store');
+    const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
+    settingsStore.set('zoomFactor', clamped);
 
     BrowserWindow.getAllWindows().forEach(win => {
         if (!win.isDestroyed()) {
@@ -302,9 +298,9 @@ ipcMain.handle('manager.zoom.set', async (_e, factor) => {
 });
 
 ipcMain.handle('manager.zoom.reset', async () => {
-    const data = readSettings();
-    data['manager.zoomFactor'] = 1.0;
-    writeSettings(data);
+    const store = require('canbox-core/lib/store');
+    const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
+    settingsStore.set('zoomFactor', 1.0);
 
     BrowserWindow.getAllWindows().forEach(win => {
         if (!win.isDestroyed()) {
@@ -338,44 +334,11 @@ function createWindow() {
 
     console.timeEnd('[startup] BrowserWindow 创建');
 
-    // --- 精细计时：页面加载各阶段 ---
-    const loadPhaseTimers = {};
-    let loadTimerStarted = false;
-
-    mainWindow.webContents.on('did-start-navigation', (_e, _url, isInPlace) => {
-        if (!isInPlace) {
-            loadPhaseTimers.navigationStart = performance.now();
-            console.log(`[startup:phase] did-start-navigation @ +${(performance.now()).toFixed(0)}ms`);
-        }
-    });
-    mainWindow.webContents.on('did-navigate', (_e, _url) => {
-        console.log(`[startup:phase] did-navigate @ +${(performance.now()).toFixed(0)}ms`);
-    });
-    mainWindow.webContents.on('did-start-loading', () => {
-        loadPhaseTimers.loadingStart = performance.now();
-        if (!loadTimerStarted) {
-            loadTimerStarted = true;
-            console.time('[startup] 页面加载 (did-finish-load)');
-        }
-        console.log(`[startup:phase] did-start-loading @ +${(performance.now()).toFixed(0)}ms`);
-    });
-    mainWindow.webContents.on('dom-ready', () => {
-        console.log(`[startup:phase] dom-ready @ +${(performance.now()).toFixed(0)}ms (自 start-loading: ${(performance.now() - (loadPhaseTimers.loadingStart || 0)).toFixed(0)}ms)`);
-    });
-    mainWindow.webContents.on('did-finish-load', () => {
-        if (loadTimerStarted) {
-            console.timeEnd('[startup] 页面加载 (did-finish-load)');
-            loadTimerStarted = false;
-        }
-        console.log(`[startup:phase] did-finish-load @ +${(performance.now()).toFixed(0)}ms`);
-    });
-
     const isDev = process.env.NODE_ENV === 'development';
     console.log(`[startup] 模式: ${isDev ? '开发 (loadURL)' : '生产 (loadFile)'}`);
 
     if (isDev) {
         mainWindow.loadURL('http://localhost:5101');
-        // mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
         mainWindow.webContents.openDevTools({ mode: 'detach' });
     } else {
         mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
@@ -384,8 +347,9 @@ function createWindow() {
     // 应用保存的缩放比例（dom-ready 后设置，避免闪烁）
     mainWindow.webContents.on('dom-ready', () => {
         try {
-            const data = readSettings();
-            const zoomFactor = data['manager.zoomFactor'] || 1.0;
+            const store = require('canbox-core/lib/store');
+            const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
+            const zoomFactor = settingsStore.get('zoomFactor') || 1.0;
             if (zoomFactor !== 1.0) {
                 mainWindow.webContents.setZoomFactor(zoomFactor);
                 console.log(`[startup] Applied zoom factor: ${zoomFactor}`);
