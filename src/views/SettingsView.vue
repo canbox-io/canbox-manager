@@ -182,7 +182,7 @@ async function handleReset() {
 }
 
 .view-title {
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 600;
     margin: 0;
     color: var(--el-text-color-primary);
@@ -197,7 +197,7 @@ async function handleReset() {
 }
 
 .section-title {
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 600;
 }
 
@@ -220,12 +220,12 @@ async function handleReset() {
 }
 
 .label-text {
-    font-size: 14px;
+    font-size: 15px;
     color: var(--el-text-color-primary);
 }
 
 .label-hint {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--el-text-color-placeholder);
 }
 
@@ -240,9 +240,9 @@ async function handleReset() {
 }
 
 .zoom-value {
-    min-width: 40px;
+    min-width: 44px;
     text-align: center;
-    font-size: 14px;
+    font-size: 15px;
     color: var(--el-text-color-primary);
 }
 </style>

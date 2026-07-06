@@ -113,8 +113,8 @@ onMounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     border-radius: 12px;
     color: var(--el-text-color-secondary);
     cursor: pointer;
@@ -147,7 +147,7 @@ onMounted(() => {
 }
 
 .nav-label {
-    font-size: 14px;
+    font-size: 15px;
     white-space: nowrap;
 }
 

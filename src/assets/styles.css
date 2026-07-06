@@ -15,7 +15,7 @@ html, body {
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
         'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
-    font-size: 14px;
+    font-size: 15px;
     color: var(--el-text-color-primary);
     background: var(--el-bg-color-page);
     -webkit-font-smoothing: antialiased;
@@ -67,7 +67,7 @@ html, body {
 
 /* 侧边栏 emoji 图标 */
 .sidebar-emoji {
-    font-size: 24px;
+    font-size: 22px;
     line-height: 1;
     flex-shrink: 0;
 }
@@ -75,7 +75,7 @@ html, body {
     font-size: 28px;
 }
 .sidebar-emoji--sm {
-    font-size: 20px;
+    font-size: 18px;
 }
 
 /* 卡片内 emoji */
