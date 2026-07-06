@@ -129,6 +129,13 @@ onMounted(() => {
     gap: 10px;
 }
 
+/* 展开时 emoji 占固定宽度，保证文字对齐 */
+.app-sidebar.expanded .sidebar-emoji {
+    width: 22px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
 .nav-item:hover {
     background-color: var(--el-fill-color-light);
     color: var(--el-text-color-primary);
