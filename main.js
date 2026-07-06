@@ -129,19 +129,13 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
     }
 
     try {
-        // 从 {Users}/canbox.json 读取 canbox-core 路径（injection.js 注入时写入）
-        const Store = require('electron-store');
-        const coreStore = new Store({ cwd: USERS_PATH, name: 'canbox' });
-        const corePath = coreStore.get('core.injectionPath');
-        if (!corePath) {
-            return { success: false, error: 'canbox-core path not found in canbox.json' };
-        }
-        const coreInjection = path.join(corePath, 'injection.js');
+        const coreInjection = path.join(global.__CANBOX_CORE_PATH__, 'injection.js');
 
         const child = spawn(process.execPath, [
             '-r', coreInjection,
             appPath,
-            `--app-id=${appId}`
+            `--app-id=${appId}`,
+            '--no-sandbox'
         ], {
             detached: true,
             stdio: 'ignore'
