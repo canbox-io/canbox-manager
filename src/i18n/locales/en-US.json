@@ -25,7 +25,6 @@
         "clearData": "Clear Data",
         "clearDataConfirm": "Are you sure you want to clear this app's data?",
         "clearDataSuccess": "Data cleared",
-        "running": "Running",
         "actions": "Actions"
     },
     "repos": {

@@ -66,7 +66,6 @@ const api = {
         appsImport: (appPath) => ipcRenderer.invoke('manager.apps.import', appPath),
         appsRemove: (appId) => ipcRenderer.invoke('manager.apps.remove', appId),
         appsLaunch: (appId) => ipcRenderer.invoke('manager.apps.launch', appId),
-        appsGetRunning: () => ipcRenderer.invoke('manager.apps.getRunning'),
         appsClearData: (appId) => ipcRenderer.invoke('manager.apps.clearData', appId),
 
         // 仓库管理

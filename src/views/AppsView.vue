@@ -87,9 +87,6 @@ async function handleClearData(app) {
     }
 }
 
-function isRunning(appId) {
-    return appsStore.runningApps.has(appId);
-}
 </script>
 
 <template>
@@ -131,14 +128,6 @@ function isRunning(appId) {
                     </div>
                 </div>
                 <div class="app-actions">
-                    <el-tag
-                        v-if="isRunning(app.appId)"
-                        type="success"
-                        size="small"
-                        class="running-tag"
-                    >
-                        {{ $t('apps.running') }}
-                    </el-tag>
                     <el-button size="small" @click="handleLaunch(app)">
                         ▶️ {{ $t('apps.launch') }}
                     </el-button>
@@ -259,9 +248,5 @@ function isRunning(appId) {
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
-}
-
-.running-tag {
-    margin-right: 4px;
 }
 </style>

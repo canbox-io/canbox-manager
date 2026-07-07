@@ -202,7 +202,10 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
             '--no-sandbox'
         ], {
             detached: true,
-            stdio: 'ignore'
+            stdio: 'ignore',
+            // 清除 NODE_ENV，避免 manager 开发模式的 NODE_ENV=development 被子进程继承
+            // 导致 APP 误判为开发模式（打开 devTools、加载 devServer 等）
+            env: { ...process.env, NODE_ENV: 'production' }
         });
         child.unref();
 
@@ -224,11 +227,6 @@ ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
     } catch (e) {
         return { success: false, error: e.message };
     }
-});
-
-ipcMain.handle('manager.apps.getRunning', async () => {
-    // TODO: 进程管理待实现
-    return [];
 });
 
 // -- 仓库管理 --

@@ -4,7 +4,6 @@ import { ref } from 'vue';
 export const useAppsStore = defineStore('apps', () => {
     const apps = ref([]);
     const loading = ref(false);
-    const runningApps = ref(new Set());
 
     async function fetchApps() {
         loading.value = true;
@@ -33,9 +32,6 @@ export const useAppsStore = defineStore('apps', () => {
 
     async function launchApp(appId) {
         const result = await window.api.manager.appsLaunch(appId);
-        if (result.success) {
-            runningApps.value.add(appId);
-        }
         return result;
     }
 
@@ -47,7 +43,6 @@ export const useAppsStore = defineStore('apps', () => {
     return {
         apps,
         loading,
-        runningApps,
         fetchApps,
         importApp,
         removeApp,

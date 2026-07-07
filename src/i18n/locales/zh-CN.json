@@ -25,7 +25,6 @@
         "clearData": "清理数据",
         "clearDataConfirm": "确定要清理此应用的数据吗？",
         "clearDataSuccess": "数据已清理",
-        "running": "运行中",
         "actions": "操作"
     },
     "repos": {
