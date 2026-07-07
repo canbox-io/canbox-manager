@@ -9,6 +9,23 @@ const { t } = useI18n();
 const appsStore = useAppsStore();
 const importing = ref(false);
 
+// 平台 SVG 图标（与 canbox-developer 保持一致）
+const PLATFORM_ICONS_SVG = {
+    windows: '<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>',
+    darwin: '<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>',
+    linux: '<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 00-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139z"/></svg>'
+};
+const PLATFORM_NAMES = {
+    windows: 'Windows',
+    darwin: 'macOS',
+    linux: 'Linux'
+};
+
+// 解析 APP 支持的平台，无 platforms 字段则默认全平台
+function getPlatforms(app) {
+    return app.platforms && app.platforms.length > 0 ? app.platforms : ['windows', 'darwin', 'linux'];
+}
+
 onMounted(() => {
     appsStore.fetchApps();
 });
@@ -110,65 +127,86 @@ async function handleClearData(app) {
             </el-empty>
         </div>
 
-        <div v-else class="apps-grid">
-            <el-card
-                v-for="app in appsStore.apps"
-                :key="app.appId"
-                class="app-card"
-                shadow="hover"
-            >
-                <div class="app-info">
-                    <div class="app-icon">
-                        <span class="icon-emoji">📦</span>
+        <div v-else class="app-list">
+            <div v-for="app in appsStore.apps" :key="app.appId" class="app-card">
+                <!-- Logo -->
+                <div class="logo-section">
+                    <img v-if="app.logo" :src="app.logo" :alt="app.name" />
+                    <span v-else class="logo-placeholder">📦</span>
+                </div>
+
+                <!-- 信息区域 -->
+                <div class="info-section">
+                    <div class="name-row">
+                        <span class="app-name">{{ app.name }}</span>
+                        <span class="app-version">v{{ app.version }}</span>
+                        <!-- 平台图标靠右，无 platforms 则默认全平台 -->
+                        <span class="platforms">
+                            <el-tooltip
+                                v-for="p in getPlatforms(app)"
+                                :key="p"
+                                :content="PLATFORM_NAMES[p] || p"
+                                placement="top"
+                            >
+                                <span class="platform-icon" v-html="PLATFORM_ICONS_SVG[p] || ''"></span>
+                            </el-tooltip>
+                        </span>
                     </div>
-                    <div class="app-meta">
-                        <h3 class="app-name">{{ app.name }}</h3>
-                        <p class="app-version">v{{ app.version }}</p>
-                        <p v-if="app.description" class="app-desc">{{ app.description }}</p>
+                    <div class="app-desc">{{ app.description || $t('apps.noDesc') }}</div>
+                    <div class="app-id">{{ app.appId }}</div>
+
+                    <!-- keywords 标签 -->
+                    <div v-if="app.keywords && app.keywords.length > 0" class="app-keywords">
+                        <span v-for="kw in app.keywords" :key="kw" class="keyword-tag">#{{ kw }}</span>
+                    </div>
+
+                    <!-- 底部操作按钮 -->
+                    <div class="app-actions">
+                        <el-tooltip :content="$t('apps.launch')" placement="top">
+                            <button class="icon-btn run-btn" @click="handleLaunch(app)">▶️</button>
+                        </el-tooltip>
+                        <el-tooltip :content="$t('apps.clearData')" placement="top">
+                            <button class="icon-btn clear-btn" @click="handleClearData(app)">🧹</button>
+                        </el-tooltip>
+                        <el-tooltip :content="$t('apps.remove')" placement="top">
+                            <button class="icon-btn delete-btn" @click="handleRemove(app)">🗑️</button>
+                        </el-tooltip>
                     </div>
                 </div>
-                <div class="app-actions">
-                    <el-button size="small" @click="handleLaunch(app)">
-                        ▶️ {{ $t('apps.launch') }}
-                    </el-button>
-                    <el-button size="small" type="danger" plain @click="handleRemove(app)">
-                        🗑 {{ $t('apps.remove') }}
-                    </el-button>
-                    <el-button size="small" @click="handleClearData(app)">
-                        🧹 {{ $t('apps.clearData') }}
-                    </el-button>
-                </div>
-            </el-card>
+            </div>
         </div>
     </div>
 </template>
 
 <style scoped>
 .view-container {
-    padding: 24px;
     height: 100%;
-    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
 .view-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 24px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--el-border-color-light);
+    flex-shrink: 0;
 }
 
 .view-title {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 600;
     margin: 0;
     color: var(--el-text-color-primary);
 }
 
-.empty-state {
+.empty-state,
+.loading-state {
+    flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 400px;
 }
 
 .empty-hint {
@@ -176,77 +214,166 @@ async function handleClearData(app) {
     font-size: 14px;
 }
 
-.loading-state {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 400px;
-    color: var(--el-color-primary);
+.spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--el-border-color-lighter);
+    border-top-color: var(--el-color-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
 }
 
-.apps-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
-.app-card :deep(.el-card__body) {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-}
-
-.app-info {
-    display: flex;
-    align-items: center;
-    gap: 16px;
+/* 卡片布局：logo 左侧 + 信息右侧 */
+.app-list {
     flex: 1;
-    min-width: 0;
+    padding: 24px;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+    gap: 16px;
+    align-content: start;
 }
 
-.app-icon {
-    width: 52px;
-    height: 52px;
+.app-card {
+    background: var(--el-fill-color-light);
     border-radius: 12px;
-    background: var(--el-color-primary-light-9);
-    color: var(--el-color-primary);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    padding: 20px;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: flex-start;
+    transition: box-shadow 0.2s;
+}
+.app-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* Logo */
+.logo-section {
     flex-shrink: 0;
 }
-
-.app-meta {
-    min-width: 0;
+.logo-section img {
+    width: 72px;
+    height: 72px;
+    border-radius: 12px;
+    object-fit: cover;
+}
+.logo-placeholder {
+    width: 72px;
+    height: 72px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    background: var(--el-fill-color-darker);
 }
 
+/* 信息区域 */
+.info-section {
+    flex: 1;
+    margin-left: 16px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+.name-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
 .app-name {
-    font-size: 15px;
+    font-size: 19px;
     font-weight: 600;
-    margin: 0 0 2px;
     color: var(--el-text-color-primary);
 }
-
 .app-version {
-    font-size: 12px;
-    color: var(--el-text-color-placeholder);
-    margin: 0 0 4px;
+    color: var(--el-text-color-regular);
+    font-size: 15px;
 }
-
-.app-desc {
-    font-size: 13px;
+.platforms {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+}
+.platform-icon {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--el-text-color-secondary);
-    margin: 0;
+    cursor: help;
+}
+.platform-icon :deep(svg) {
+    width: 100%;
+    height: 100%;
+}
+.app-desc {
+    color: var(--el-text-color-primary);
+    font-size: 16px;
+    margin-top: 6px;
+    line-height: 1.5;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.app-id {
+    color: var(--el-text-color-placeholder);
+    font-size: 13px;
+    margin-top: 4px;
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.app-keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+.keyword-tag {
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
+    background: var(--el-fill-color-darker);
+    border-radius: 4px;
+    padding: 2px 8px;
+}
 
+/* 操作按钮 */
 .app-actions {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
+    gap: 10px;
+    margin-top: 12px;
 }
+
+.icon-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: var(--el-fill-color);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 0;
+    line-height: 1;
+}
+.icon-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+.icon-btn:active {
+    transform: translateY(0);
+}
+.run-btn:hover { background: var(--el-color-success-light-9); }
+.clear-btn:hover { background: var(--el-color-warning-light-9); }
+.delete-btn:hover { background: var(--el-color-danger-light-9); }
 </style>

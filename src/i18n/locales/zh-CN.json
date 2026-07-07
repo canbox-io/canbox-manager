@@ -25,7 +25,8 @@
         "clearData": "清理数据",
         "clearDataConfirm": "确定要清理此应用的数据吗？",
         "clearDataSuccess": "数据已清理",
-        "actions": "操作"
+        "actions": "操作",
+        "noDesc": "暂无描述"
     },
     "repos": {
         "title": "应用仓库",

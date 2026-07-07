@@ -23,7 +23,7 @@ import 'element-plus/dist/index.css';
 // Element Plus — 手动按需注册组件（避免 unplugin-vue-components 产生大量 sub-path HTTP 请求）
 import {
     ElContainer, ElAside, ElMain,
-    ElButton, ElCard, ElTag, ElEmpty,
+    ElButton, ElCard, ElTag, ElEmpty, ElTooltip,
     ElDialog, ElForm, ElFormItem, ElInput,
     ElSelect, ElOption, ElSwitch, ElInputNumber
 } from 'element-plus';
@@ -48,6 +48,7 @@ app.component('ElButton', ElButton);
 app.component('ElCard', ElCard);
 app.component('ElTag', ElTag);
 app.component('ElEmpty', ElEmpty);
+app.component('ElTooltip', ElTooltip);
 app.component('ElDialog', ElDialog);
 app.component('ElForm', ElForm);
 app.component('ElFormItem', ElFormItem);
