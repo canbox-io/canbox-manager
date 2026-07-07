@@ -35,10 +35,10 @@ let mainWindow = null;
 
 // -- APP 管理 --
 
-// 生成随机 appId（8 位字母数字）
+// 生成随机 appId（8 位小写字母+数字）
 function generateAppId() {
     const { customAlphabet } = require('nanoid');
-    return customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', 8)();
+    return customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 8)();
 }
 
 // 获取 manager 自己的 store（存 id → appId 映射等）
@@ -114,6 +114,18 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
         tempDir = path.join(os.tmpdir(), `canbox-import-${Date.now()}`);
         zip.extractAllTo(tempDir, true);
 
+        // 修复 app.asar：Electron fs 补丁可能把 .asar 文件当目录处理，导致解压后变空目录
+        const tempAsarPath = path.join(tempDir, 'app.asar');
+        if (fs.existsSync(tempAsarPath) && fs.statSync(tempAsarPath).isDirectory()) {
+            // asar 被当目录了，从 zip 中重新提取原始数据
+            const asarEntry = zip.getEntry('app.asar');
+            if (asarEntry) {
+                fs.rmSync(tempAsarPath, { recursive: true, force: true });
+                const originalFs = require('original-fs');
+                originalFs.writeFileSync(tempAsarPath, asarEntry.getData());
+            }
+        }
+
         // 标准 zip 结构：根目录直接含 package.json
         const pkgPath = path.join(tempDir, 'package.json');
         if (!fs.existsSync(pkgPath)) {
@@ -151,13 +163,22 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
 
 ipcMain.handle('manager.apps.remove', async (_e, appId) => {
     const appPath = path.join(USERS_PATH, 'apps', appId);
+    console.log('[manager] remove app, appId=%s, path=%s', appId, appPath);
 
     if (!fs.existsSync(appPath)) {
+        console.log('[manager] remove: path not found');
         return { success: false, error: 'APP not found' };
     }
 
-    fs.rmSync(appPath, { recursive: true, force: true });
-    return { success: true };
+    try {
+        const originalFs = require('original-fs');
+        originalFs.rmSync(appPath, { recursive: true, force: true });
+        console.log('[manager] remove: done, exists=%s', fs.existsSync(appPath));
+        return { success: true };
+    } catch (e) {
+        console.error('[manager] remove failed:', e);
+        return { success: false, error: e.message };
+    }
 });
 
 ipcMain.handle('manager.apps.launch', async (_e, appId) => {
@@ -196,7 +217,8 @@ ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
 
     try {
         if (fs.existsSync(dataDir)) {
-            fs.rmSync(dataDir, { recursive: true, force: true });
+            const originalFs = require('original-fs');
+            originalFs.rmSync(dataDir, { recursive: true, force: true });
         }
         return { success: true };
     } catch (e) {
@@ -434,14 +456,16 @@ function copyDirSync(src, dest) {
     if (!fs.existsSync(dest)) {
         fs.mkdirSync(dest, { recursive: true });
     }
-    const entries = fs.readdirSync(src, { withFileTypes: true });
+    const originalFs = require('original-fs');
+    const entries = originalFs.readdirSync(src, { withFileTypes: true });
     for (const entry of entries) {
         const srcPath = path.join(src, entry.name);
         const destPath = path.join(dest, entry.name);
         if (entry.isDirectory()) {
             copyDirSync(srcPath, destPath);
         } else {
-            fs.copyFileSync(srcPath, destPath);
+            // 用 original-fs 复制，避免 Electron asar 补丁干扰 .asar 文件
+            originalFs.copyFileSync(srcPath, destPath);
         }
     }
 }

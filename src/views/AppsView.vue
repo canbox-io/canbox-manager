@@ -47,7 +47,7 @@ async function doImport(appPath) {
 
 async function handleLaunch(app) {
     try {
-        const result = await appsStore.launchApp(app.id);
+        const result = await appsStore.launchApp(app.appId);
         if (!result.success) {
             notification.error(result.error || t('apps.launchFailed'));
         }
@@ -63,8 +63,9 @@ async function handleRemove(app) {
             t('apps.remove'),
             { type: 'warning' }
         );
-        await appsStore.removeApp(app.id);
+        await appsStore.removeApp(app.appId);
         notification.success(t('apps.removeSuccess'));
+        await appsStore.fetchApps();
     } catch (e) {
         // 用户取消
     }
@@ -77,7 +78,7 @@ async function handleClearData(app) {
             t('apps.clearData'),
             { type: 'warning' }
         );
-        const result = await appsStore.clearAppData(app.id);
+        const result = await appsStore.clearAppData(app.appId);
         if (result.success) {
             notification.success(t('apps.clearDataSuccess'));
         }
@@ -115,7 +116,7 @@ function isRunning(appId) {
         <div v-else class="apps-grid">
             <el-card
                 v-for="app in appsStore.apps"
-                :key="app.id"
+                :key="app.appId"
                 class="app-card"
                 shadow="hover"
             >
@@ -131,7 +132,7 @@ function isRunning(appId) {
                 </div>
                 <div class="app-actions">
                     <el-tag
-                        v-if="isRunning(app.id)"
+                        v-if="isRunning(app.appId)"
                         type="success"
                         size="small"
                         class="running-tag"
