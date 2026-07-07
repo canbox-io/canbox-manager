@@ -17,103 +17,84 @@ canbox-{version}-{platform}/
 └── canbox-manager.desktop
 ```
 
-**canbox-manager 不拥有任何特殊权限。** 它和其他 Canbox APP（如 imagebox、用户手动导入的 APP）完全平等——都是通过相同方式启动：
+**canbox-manager 不拥有任何特殊权限。** 它和其他 Canbox APP 完全平等——都是通过相同方式启动：
 
 ```bash
-# manager 启动（和其他 APP 完全一致的启动方式）
-./electron/electron -r ./canbox-core/injection.js ./canbox-manager/
-
-# imagebox 启动（用户从 repo 下载后）
-./electron/electron -r ./canbox-core/injection.js {user-data}/apps/imagebox/
+electron -r canbox-core/injection.js canbox-manager/ --app-id=canbox-manager --no-sandbox
 ```
 
 ## 职责
 
-### 1. APP 注册管理
+### 1. APP 管理
 
-- 查看已安装的 APP 列表
-- **导入已有 APP**：用户选择本地 APP 目录，注册到 Canbox
-- **从仓库下载**：浏览 repo 中的 APP，下载安装
-- 删除 APP / 清理 APP 数据
-- 启动 / 停止 APP
-
-数据存储：通过 `canbox.db.put('core', doc)` 维护 APP 注册表。
+- 查看已安装的 APP 列表（读 `apps/{appId}/package.json` + `logo.png` 获取元数据）
+- **导入 APP**：用户选择 canbox 标准 zip 包 → 解压到 `apps/{appId}/` → 生成随机 appId → 记录 id→appId 映射
+- **从仓库下载**：浏览 repo 中的 APP，下载 zip 安装
+- 删除 APP（`rm -rf apps/{appId}/`）
+- 清理 APP 数据（`rm -rf data/{appId}/`）
+- 启动 APP（`electron -r injection.js apps/{appId}/app.asar --app-id={appId} --no-sandbox`）
 
 ### 2. 仓库管理
 
-- 添加 / 删除 APP 仓库（GitHub Release、自定义 URL 等）
-- 浏览仓库中的 APP 列表（app.json 元数据展示）
-- 下载 APP（asar 或目录形式）到 `{user-data}/apps/`
-
-数据存储：通过 `canbox.store.get/set('manager', ...)` 维护仓库配置。
+- 添加 / 删除 APP 仓库
+- 浏览仓库中的 APP 列表
+- 下载 APP（按当前平台匹配 zip）
 
 ### 3. 系统设置
 
-- 语言切换（i18n）
-- 界面字体设置
-- APP 默认执行模式（窗口 / 独立进程）
-- 自动启动设置
-- 日志级别等
+- 缩放比例
+- 语言切换
+- 其他设置项
 
-数据存储：通过 `canbox.store.get/set('manager', ...)` 维护设置项。
+manager 自己的数据通过 canbox-core store 存到 `data/canbox-manager/store/`（黑盒路由，appId=canbox-manager）。
 
-### 4. 其他通用能力（共享 canbox-core 提供）
+## APP 分发格式
 
-- **操作历史**：通过 `canbox.db.get('history', ...)` 查阅操作记录
-- **快捷键管理**：通过 `canbox.shortcut.*` 注册/管理全局快捷键
-- **通知**：通过 `canbox.window.notification(...)` 发送系统通知
-- **日志**：自动写入 `{user-data}/logs/canbox.log`（canbox-core 隐性能力）
+canbox-manager 导入的 zip 包是 canbox 标准格式（由 canbox-developer 发布时生成）：
 
-## 不负责的内容
+```
+{id}-{version}[-{platform}-{arch}].zip
+├── app.asar                  # APP 代码 + JS 依赖
+├── app.asar.unpacked/        # 原生模块（可选）
+├── package.json              # APP 元数据
+└── logo.png                  # APP 图标
+```
 
-- **APP 自身的能力实现**：manager 仅做"管理"，不包含任何具体 APP 功能
-- **APP 进程管理**：APP 启动后是独立进程，manager 不介入其内部运行
-- **APP 间通信**：APP 之间通过共享存储（canboxDb）自然协作，manager 不做中转
-- **自动更新**：属于 canbox-core 或产品包层面的能力，manager 不做
+导入时直接解压到 `apps/{appId}/`（appId 是随机生成的 8 位串），不需要猜目录结构。
+
+## 概念说明
+
+| 字段 | 说明 |
+|------|------|
+| `id` | package.json 中的可选字段，APP 全局唯一标识（反向域名格式），无则用 `name` |
+| `name` | package.json 标准字段，npm 包名 |
+| `appId` | canbox 安装时生成的随机 8 位串，用于文件系统目录名和数据隔离路由 |
 
 ## 项目结构
 
 ```
 canbox-manager/
-├── package.json              # 元数据 & 依赖（Vue、Element Plus 等前端栈）
-├── main.js                   # Electron 主进程入口
-├── preload.js                # contextBridge 暴露 canbox-core API
-├── vite.config.js            # Vite 构建配置
-├── index.html                # Vite 入口 HTML
+├── package.json              # 元数据 & 依赖
+├── main.js                   # Electron 主进程入口 + manager 专用 IPC
+├── preload.js                # contextBridge（core API 黑盒 + manager API）
+├── vite.config.mjs           # Vite 构建配置
+├── index.html                # HTML 入口
 ├── src/                      # Vue 前端源码
 │   ├── main.js               # Vue 入口
-│   ├── App.vue               # 根组件
+│   ├── App.vue               # 主布局（左侧导航 + 右侧内容）
 │   ├── router/               # 路由配置
 │   ├── stores/               # Pinia 状态管理
 │   ├── views/                # 页面视图
-│   │   ├── AppsView.vue      # APP 管理（列表、导入、启动、删除）
-│   │   ├── ReposView.vue     # 仓库管理（添加、浏览、下载）
-│   │   └── SettingsView.vue  # 系统设置
-│   ├── components/           # 公共组件
 │   └── utils/                # 工具函数
-├── .gitignore
+├── LICENSE
 └── README.md
 ```
 
 ## 开发
 
 ```bash
-# 安装依赖
 npm install
-
-# 启动开发模式（需要先启动 canbox-core 所在的产品包环境）
-# 或独立运行（此时 canbox-core API 不可用，仅调试 UI）
-npm run dev
-
-# 构建
-npm run build
+npm run dev      # Vite dev server (port 5101)
+npm run start    # electron -r canbox-core/injection.js . --app-id=canbox-manager --no-sandbox
+npm run build    # Vite 构建
 ```
-
-## 与其他项目的关系
-
-| 项目 | 关系 | 说明 |
-|------|------|------|
-| canbox-core | 运行时依赖 | manager 通过 injection.js 获得基础设施和 API |
-| canbox-core 仓库 | 无直接依赖 | manager 的 `package.json` 不声明 canbox-core 为 npm 依赖 |
-| APP 仓库（imagebox 等） | 平级关系 | 同属 Canbox 生态中的普通 APP |
-| 其他 APP | 无耦合 | manager 通过 canboxDb 读 APP 注册信息，不直接与 APP 通信 |

@@ -34,6 +34,19 @@ let mainWindow = null;
 // ====== Manager 专用 IPC Handlers ======
 
 // -- APP 管理 --
+
+// 生成随机 appId（8 位字母数字）
+function generateAppId() {
+    const { customAlphabet } = require('nanoid');
+    return customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', 8)();
+}
+
+// 获取 manager 自己的 store（存 id → appId 映射等）
+function getManagerStore() {
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
+    return store.getStore('canbox-manager', 'apps', path.join(USERS_PATH, 'data'));
+}
+
 ipcMain.handle('manager.apps.list', async () => {
     const appsDir = path.join(USERS_PATH, 'apps');
     if (!fs.existsSync(appsDir)) return [];
@@ -42,18 +55,38 @@ ipcMain.handle('manager.apps.list', async () => {
     const apps = [];
     for (const entry of entries) {
         if (entry.isDirectory()) {
-            const appPath = path.join(appsDir, entry.name);
-            const pkgPath = path.join(appPath, 'package.json');
+            const appDir = path.join(appsDir, entry.name);
+            const pkgPath = path.join(appDir, 'package.json');
             if (fs.existsSync(pkgPath)) {
                 try {
                     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+                    // 读 logo（base64 data URI）
+                    let logo = '';
+                    const logoCandidates = pkg.logo
+                        ? [pkg.logo]
+                        : ['logo.png', 'logo.svg', 'icon.png'];
+                    for (const candidate of logoCandidates) {
+                        const logoPath = path.join(appDir, candidate);
+                        if (fs.existsSync(logoPath)) {
+                            try {
+                                const ext = path.extname(candidate).slice(1).toLowerCase();
+                                const mime = ext === 'svg' ? 'image/svg+xml' : 'image/png';
+                                logo = `data:${mime};base64,${fs.readFileSync(logoPath).toString('base64')}`;
+                            } catch (e) {}
+                            break;
+                        }
+                    }
                     apps.push({
-                        id: entry.name,
+                        appId: entry.name,
+                        id: pkg.id || pkg.name || entry.name,
                         name: pkg.displayName || pkg.name || entry.name,
                         version: pkg.version || '0.0.0',
                         description: pkg.description || '',
                         author: pkg.author || '',
-                        path: appPath
+                        keywords: pkg.keywords || [],
+                        platforms: pkg.platforms || [],
+                        logo,
+                        path: appDir
                     });
                 } catch (e) {
                     // 解析失败的跳过
@@ -73,7 +106,6 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
     }
 
     let tempDir = null;
-    // 临时禁用 asar 补丁：解压时遇到 .asar 文件，Electron 修补的 fs 会将其视为归档导致 chmod/stat 失败
     const prevNoAsar = process.noAsar;
     process.noAsar = true;
     try {
@@ -82,26 +114,33 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
         tempDir = path.join(os.tmpdir(), `canbox-import-${Date.now()}`);
         zip.extractAllTo(tempDir, true);
 
-        // 查找 package.json — 可能在子目录（GitHub 的 zip 会套一层目录）
-        const sourcePath = findAppDir(tempDir);
-        if (!sourcePath) {
-            return { success: false, error: 'Invalid APP zip: no package.json found' };
+        // 标准 zip 结构：根目录直接含 package.json
+        const pkgPath = path.join(tempDir, 'package.json');
+        if (!fs.existsSync(pkgPath)) {
+            return { success: false, error: 'Invalid APP zip: no package.json found at root' };
         }
 
-        const pkgPath = path.join(sourcePath, 'package.json');
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-        const appId = pkg.name;
+        const appIdentifier = pkg.id || pkg.name;
+        if (!appIdentifier) {
+            return { success: false, error: 'package.json must have "id" or "name" field' };
+        }
+
+        // 生成随机 appId
+        const appId = generateAppId();
         const destPath = path.join(appsDir, appId);
 
-        if (fs.existsSync(destPath)) {
-            return { success: false, error: 'APP already installed' };
-        }
-
-        // 复制 APP 目录
+        // 复制 APP 到 apps/{appId}/
         fs.mkdirSync(destPath, { recursive: true });
-        copyDirSync(sourcePath, destPath);
+        copyDirSync(tempDir, destPath);
 
-        return { success: true, appId };
+        // 记录 id → appId 映射
+        const mgrStore = getManagerStore();
+        let idMap = mgrStore.get('idMap') || {};
+        idMap[appIdentifier] = appId;
+        mgrStore.set('idMap', idMap);
+
+        return { success: true, appId, id: appIdentifier };
     } catch (e) {
         return { success: false, error: e.message };
     } finally {
@@ -122,18 +161,22 @@ ipcMain.handle('manager.apps.remove', async (_e, appId) => {
 });
 
 ipcMain.handle('manager.apps.launch', async (_e, appId) => {
-    const appPath = path.join(USERS_PATH, 'apps', appId);
+    const appDir = path.join(USERS_PATH, 'apps', appId);
 
-    if (!fs.existsSync(appPath)) {
+    if (!fs.existsSync(appDir)) {
         return { success: false, error: 'APP not found' };
     }
 
     try {
         const coreInjection = path.join(global.__CANBOX_CORE_PATH__, 'injection.js');
 
+        // 优先启动 app.asar，兼容源码目录模式
+        const asarPath = path.join(appDir, 'app.asar');
+        const target = fs.existsSync(asarPath) ? asarPath : appDir;
+
         const child = spawn(process.execPath, [
             '-r', coreInjection,
-            appPath,
+            target,
             `--app-id=${appId}`,
             '--no-sandbox'
         ], {
@@ -403,24 +446,4 @@ function copyDirSync(src, dest) {
     }
 }
 
-/**
- * 在目录中查找包含 package.json 的 APP 目录。
- * zip 解压后可能多套一层目录（如 GitHub zip），需要向下查找。
- */
-function findAppDir(dirPath) {
-    // 当前目录就有 package.json
-    if (fs.existsSync(path.join(dirPath, 'package.json'))) {
-        return dirPath;
-    }
-    // 查找一级子目录（排除 node_modules）
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-        if (entry.isDirectory() && entry.name !== 'node_modules') {
-            const subPath = path.join(dirPath, entry.name);
-            if (fs.existsSync(path.join(subPath, 'package.json'))) {
-                return subPath;
-            }
-        }
-    }
-    return null;
-}
+
