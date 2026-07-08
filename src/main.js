@@ -25,7 +25,8 @@ import {
     ElContainer, ElAside, ElMain,
     ElButton, ElCard, ElTag, ElEmpty, ElTooltip,
     ElDialog, ElForm, ElFormItem, ElInput,
-    ElSelect, ElOption, ElSwitch, ElInputNumber
+    ElSelect, ElOption, ElSwitch, ElInputNumber,
+    ElDrawer, ElProgress
 } from 'element-plus';
 
 import './assets/styles.css';
@@ -57,6 +58,8 @@ app.component('ElSelect', ElSelect);
 app.component('ElOption', ElOption);
 app.component('ElSwitch', ElSwitch);
 app.component('ElInputNumber', ElInputNumber);
+app.component('ElDrawer', ElDrawer);
+app.component('ElProgress', ElProgress);
 
 app.mount('#app');
 const _tMounted = performance.now();

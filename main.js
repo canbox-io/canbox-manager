@@ -29,6 +29,9 @@ const USERS_PATH = env.usersPath;
 // canbox-core 根目录路径（用于 require store 等模块）
 const CORE_PATH = global.__CANBOX_CORE_PATH__;
 
+const repoProbe = require('./repo-probe');
+const appLauncher = require('./app-launcher');
+
 let mainWindow = null;
 
 // ====== Manager 专用 IPC Handlers ======
@@ -98,6 +101,19 @@ ipcMain.handle('manager.apps.list', async () => {
 });
 
 ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
+    const result = await importAppFromZip(zipPath);
+    // 生产模式下写 launcher
+    if (result.success) {
+        const appInfo = readAppInfo(result.appId);
+        if (appInfo) appLauncher.generateLauncher(appInfo);
+    }
+    return result;
+});
+
+/**
+ * 从 zip 导入 APP（提取为独立函数，供 apps.import 和 repos.install 共用）
+ */
+async function importAppFromZip(zipPath) {
     const appsDir = path.join(USERS_PATH, 'apps');
     const os = require('os');
 
@@ -159,7 +175,40 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
         process.noAsar = prevNoAsar;
         if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
     }
-});
+}
+
+/**
+ * 读取已安装 APP 的信息（用于 launcher 生成）
+ */
+function readAppInfo(appId) {
+    const appDir = path.join(USERS_PATH, 'apps', appId);
+    const pkgPath = path.join(appDir, 'package.json');
+    if (!fs.existsSync(pkgPath)) return null;
+    try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        let logo = '';
+        const logoCandidates = pkg.logo ? [pkg.logo] : ['logo.png', 'logo.svg', 'icon.png'];
+        for (const candidate of logoCandidates) {
+            const logoPath = path.join(appDir, candidate);
+            if (fs.existsSync(logoPath)) {
+                try {
+                    const ext = path.extname(candidate).slice(1).toLowerCase();
+                    const mime = ext === 'svg' ? 'image/svg+xml' : 'image/png';
+                    logo = `data:${mime};base64,${fs.readFileSync(logoPath).toString('base64')}`;
+                } catch (e) {}
+                break;
+            }
+        }
+        return {
+            appId,
+            name: pkg.displayName || pkg.name || appId,
+            description: pkg.description || '',
+            logo
+        };
+    } catch (e) {
+        return null;
+    }
+}
 
 ipcMain.handle('manager.apps.remove', async (_e, appId) => {
     const appPath = path.join(USERS_PATH, 'apps', appId);
@@ -170,10 +219,15 @@ ipcMain.handle('manager.apps.remove', async (_e, appId) => {
         return { success: false, error: 'APP not found' };
     }
 
+    // 先读 APP 信息用于删除 launcher
+    const appInfo = readAppInfo(appId);
+
     try {
         const originalFs = require('original-fs');
         originalFs.rmSync(appPath, { recursive: true, force: true });
         console.log('[manager] remove: done, exists=%s', fs.existsSync(appPath));
+        // 删除 launcher
+        if (appInfo) appLauncher.deleteLauncher(appInfo.name);
         return { success: true };
     } catch (e) {
         console.error('[manager] remove failed:', e);
@@ -231,37 +285,77 @@ ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
 
 // -- 仓库管理 --
 // 仓库元数据存储在 manager 自己的 store 中（data/canbox-manager/store/repos.json）
-// 通过 core store IPC 访问（黑盒式，appId=canbox-manager 自动路由）
+// 数据结构：{ repos: { [repoId]: { ...repoInfo } } }
+
+function getReposStore() {
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
+    return store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
+}
+
+function getAllRepos() {
+    return getReposStore().get('repos') || {};
+}
+
+function saveAllRepos(repos) {
+    getReposStore().set('repos', repos);
+}
+
+/**
+ * 检查仓库 APP 是否已安装，返回 installedAppId
+ * @param {string} appIdentifier APP 标识（pkg.id || pkg.name，与 idMap 的 key 一致）
+ */
+function checkInstalled(appIdentifier) {
+    const mgrStore = getManagerStore();
+    const idMap = mgrStore.get('idMap') || {};
+    if (idMap[appIdentifier]) return idMap[appIdentifier];
+    return null;
+}
 
 ipcMain.handle('manager.repos.list', async () => {
     try {
-        // manager 作为普通 APP，用 canbox.store 访问自己的数据
-        // 这里在主进程中直接用 core 的 store 模块
-        const store = require(path.join(CORE_PATH, 'lib', 'store'));
-        const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
-        const list = reposStore.get('list') || [];
+        const repos = getAllRepos();
+        // 实时检查安装状态（appId 即 pkg.id || pkg.name，与 idMap key 一致）
+        const list = Object.values(repos).map(repo => ({
+            ...repo,
+            installedAppId: checkInstalled(repo.appId || repo.name)
+        }));
         return list;
     } catch (e) {
         return [];
     }
 });
 
-ipcMain.handle('manager.repos.add', async (_e, url, options) => {
+ipcMain.handle('manager.repos.add', async (_e, url) => {
     try {
-        const store = require(path.join(CORE_PATH, 'lib', 'store'));
-        const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
-        const list = reposStore.get('list') || [];
+        // 探测仓库元数据
+        const probed = await repoProbe.probeRepo(url);
 
-        const doc = {
-            id: `repo_${Date.now()}`,
+        const repoId = `repo_${Date.now()}`;
+        const repo = {
+            id: repoId,
             url,
-            name: (options && options.name) || url,
+            appId: probed.id,
+            name: probed.name,
+            displayName: probed.description || probed.name,
+            version: probed.version,
+            description: probed.description,
+            author: probed.author,
+            logo: probed.logo,
+            keywords: probed.keywords,
+            platforms: probed.platforms,
+            branch: probed.branch,
+            readme: probed.readme,
+            installedAppId: checkInstalled(probed.id),
+            lastError: null,
             createdAt: Date.now(),
             updatedAt: Date.now()
         };
-        list.push(doc);
-        reposStore.set('list', list);
-        return { success: true, repo: doc };
+
+        const repos = getAllRepos();
+        repos[repoId] = repo;
+        saveAllRepos(repos);
+
+        return { success: true, repo };
     } catch (e) {
         return { success: false, error: e.message };
     }
@@ -269,11 +363,9 @@ ipcMain.handle('manager.repos.add', async (_e, url, options) => {
 
 ipcMain.handle('manager.repos.remove', async (_e, repoId) => {
     try {
-        const store = require(path.join(CORE_PATH, 'lib', 'store'));
-        const reposStore = store.getStore('canbox-manager', 'repos', path.join(USERS_PATH, 'data'));
-        let list = reposStore.get('list') || [];
-        list = list.filter(r => r.id !== repoId);
-        reposStore.set('list', list);
+        const repos = getAllRepos();
+        delete repos[repoId];
+        saveAllRepos(repos);
         return { success: true };
     } catch (e) {
         return { success: false, error: e.message };
@@ -281,8 +373,132 @@ ipcMain.handle('manager.repos.remove', async (_e, repoId) => {
 });
 
 ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
-    // TODO: 仓库同步待实现
-    return { success: false, error: 'Not implemented yet' };
+    try {
+        const repos = getAllRepos();
+        const repo = repos[repoId];
+        if (!repo) {
+            return { success: false, error: '仓库不存在' };
+        }
+
+        const probed = await repoProbe.probeRepo(repo.url);
+
+        // 检查是否有新版本
+        const toUpdate = probed.version !== repo.version && repo.installedAppId;
+
+        repos[repoId] = {
+            ...repo,
+            appId: probed.id,
+            name: probed.name,
+            displayName: probed.description || probed.name,
+            version: probed.version,
+            description: probed.description,
+            author: probed.author,
+            logo: probed.logo,
+            keywords: probed.keywords,
+            platforms: probed.platforms,
+            branch: probed.branch,
+            readme: probed.readme,
+            installedAppId: checkInstalled(probed.id),
+            toUpdate,
+            lastError: null,
+            updatedAt: Date.now()
+        };
+        saveAllRepos(repos);
+
+        return { success: true, repo: repos[repoId] };
+    } catch (e) {
+        // 记录错误但不删除仓库
+        const repos = getAllRepos();
+        if (repos[repoId]) {
+            repos[repoId].lastError = e.message;
+            repos[repoId].updatedAt = Date.now();
+            saveAllRepos(repos);
+        }
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('manager.repos.install', async (_e, repoId) => {
+    try {
+        const repos = getAllRepos();
+        const repo = repos[repoId];
+        if (!repo) {
+            return { success: false, error: '仓库不存在' };
+        }
+
+        // 兼容旧记录：appId 字段是后加的，旧仓库记录可能缺失，此时重新 probe 补全
+        if (!repo.appId) {
+            console.log('[repos.install] repo.appId missing, re-probing to backfill: repoId=%s', repoId);
+            try {
+                const probed = await repoProbe.probeRepo(repo.url);
+                repo.appId = probed.id;
+                repo.logo = repo.logo || probed.logo;
+                repo.keywords = probed.keywords;
+                repo.platforms = probed.platforms;
+                repo.branch = probed.branch;
+                repo.readme = probed.readme;
+                saveAllRepos(repos);
+                console.log('[repos.install] backfilled appId=%s for repoId=%s', repo.appId, repoId);
+            } catch (e) {
+                console.log('[repos.install] backfill probe failed: %s', e.message);
+            }
+        }
+
+        // 获取 release 下载 URL（优先用 appId 匹配资产名，name 兜底）
+        const downloadUrl = await repoProbe.getReleaseDownloadUrl(repo.url, repo.appId || repo.name, repo.name, repo.version);
+        if (!downloadUrl) {
+            return { success: false, error: `未找到 ${repo.name} v${repo.version} 的 release 下载资产，请确认仓库已发布对应版本` };
+        }
+
+        // 下载 zip 到临时目录
+        const os = require('os');
+        const zipPath = path.join(os.tmpdir(), `canbox-repo-install-${repoId}-${Date.now()}.zip`);
+        let lastProgress = 0;
+        await repoProbe.downloadFile(downloadUrl, zipPath, (progress) => {
+            // 节流发送进度
+            if (progress - lastProgress >= 10) {
+                lastProgress = progress;
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('manager.repos.installProgress', { repoId, progress });
+                }
+            }
+        });
+
+        // 复用 importAppFromZip
+        const importResult = await importAppFromZip(zipPath);
+        // 清理临时文件
+        try { fs.unlinkSync(zipPath); } catch (e) {}
+
+        if (!importResult.success) {
+            return { success: false, error: importResult.error };
+        }
+
+        // 更新仓库元数据
+        repo.installedAppId = importResult.appId;
+        repo.toUpdate = false;
+        repo.updatedAt = Date.now();
+        repos[repoId] = repo;
+        saveAllRepos(repos);
+
+        // 生产模式下写 launcher
+        const appInfo = readAppInfo(importResult.appId);
+        if (appInfo) appLauncher.generateLauncher(appInfo);
+
+        return { success: true, appId: importResult.appId };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('manager.repos.getReadme', async (_e, repoId) => {
+    try {
+        const repos = getAllRepos();
+        const repo = repos[repoId];
+        if (!repo) return { success: false, error: '仓库不存在' };
+        return { success: true, readme: repo.readme || '', version: repo.version };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
 });
 
 // -- 设置（通过 canbox-core store，黑盒式，appId=canbox-manager 自动路由） --
@@ -432,11 +648,48 @@ ipcMain.handle('manager.appReady', () => {
 });
 
 console.time('[startup] 等待 app.whenReady');
-app.whenReady().then(() => {
-    console.timeEnd('[startup] 等待 app.whenReady');
-    Menu.setApplicationMenu(null);
-    createWindow();
-});
+
+// 检查 --launch-app-id 参数：launcher 启动模式，启动指定 APP 后立即退出
+const launchArg = process.argv.find(a => a.startsWith('--launch-app-id='));
+if (launchArg) {
+    const launchAppId = launchArg.split('=')[1];
+    app.whenReady().then(() => {
+        try {
+            const appDir = path.join(USERS_PATH, 'apps', launchAppId);
+            if (!fs.existsSync(appDir)) {
+                console.error('[launcher] APP not found:', launchAppId);
+                app.quit();
+                return;
+            }
+            const coreInjection = path.join(CORE_PATH, 'injection.js');
+            const asarPath = path.join(appDir, 'app.asar');
+            const target = fs.existsSync(asarPath) ? asarPath : appDir;
+            const child = spawn(process.execPath, [
+                '-r', coreInjection,
+                target,
+                `--app-id=${launchAppId}`,
+                '--no-sandbox'
+            ], {
+                detached: true,
+                stdio: 'ignore',
+                env: { ...process.env, NODE_ENV: 'production' }
+            });
+            child.unref();
+            console.log('[launcher] spawned APP', launchAppId, 'pid=', child.pid);
+        } catch (e) {
+            console.error('[launcher] failed:', e);
+        } finally {
+            // 立即退出 manager，不显示窗口
+            app.quit();
+        }
+    });
+} else {
+    app.whenReady().then(() => {
+        console.timeEnd('[startup] 等待 app.whenReady');
+        Menu.setApplicationMenu(null);
+        createWindow();
+    });
+}
 
 app.on('window-all-closed', () => {
     app.quit();

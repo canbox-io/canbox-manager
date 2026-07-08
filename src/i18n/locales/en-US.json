@@ -46,7 +46,17 @@
         "sync": "Sync",
         "lastSync": "Last synced",
         "never": "Never synced",
-        "syncing": "Syncing..."
+        "syncing": "Syncing...",
+        "syncSuccess": "Synced successfully",
+        "syncFailed": "Sync failed",
+        "install": "Install",
+        "update": "Update",
+        "installSuccess": "Installed successfully",
+        "installFailed": "Installation failed",
+        "installed": "Installed",
+        "hasUpdate": "Update available",
+        "probeFailed": "Probe failed",
+        "viewReadme": "View README"
     },
     "settings": {
         "title": "Settings",

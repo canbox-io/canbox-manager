@@ -70,9 +70,16 @@ const api = {
 
         // 仓库管理
         reposList: () => ipcRenderer.invoke('manager.repos.list'),
-        reposAdd: (url, options) => ipcRenderer.invoke('manager.repos.add', url, options),
+        reposAdd: (url) => ipcRenderer.invoke('manager.repos.add', url),
         reposRemove: (repoId) => ipcRenderer.invoke('manager.repos.remove', repoId),
         reposSync: (repoId) => ipcRenderer.invoke('manager.repos.sync', repoId),
+        reposInstall: (repoId) => ipcRenderer.invoke('manager.repos.install', repoId),
+        reposGetReadme: (repoId) => ipcRenderer.invoke('manager.repos.getReadme', repoId),
+        onInstallProgress: (callback) => {
+            const handler = (_e, data) => callback(data);
+            ipcRenderer.on('manager.repos.installProgress', handler);
+            return () => ipcRenderer.removeListener('manager.repos.installProgress', handler);
+        },
 
         // 设置
         settingsGet: (key) => ipcRenderer.invoke('manager.settings.get', key),
