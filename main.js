@@ -226,8 +226,52 @@ ipcMain.handle('manager.apps.remove', async (_e, appId) => {
         const originalFs = require('original-fs');
         originalFs.rmSync(appPath, { recursive: true, force: true });
         console.log('[manager] remove: done, exists=%s', fs.existsSync(appPath));
+
+        // 删除 APP 数据目录 data/{appId}/（删除应用 = 连同数据一起清除）
+        const dataPath = path.join(USERS_PATH, 'data', appId);
+        if (fs.existsSync(dataPath)) {
+            originalFs.rmSync(dataPath, { recursive: true, force: true });
+            console.log('[manager] remove: data dir removed, path=%s', dataPath);
+        }
+
         // 删除 launcher
         if (appInfo) appLauncher.deleteLauncher(appInfo.name);
+
+        // 清理 idMap：反查 appIdentifier 并删除对应映射
+        const mgrStore = getManagerStore();
+        const idMap = mgrStore.get('idMap') || {};
+        let removedIdentifier = null;
+        for (const [identifier, mappedAppId] of Object.entries(idMap)) {
+            if (mappedAppId === appId) {
+                removedIdentifier = identifier;
+                delete idMap[identifier];
+                break;
+            }
+        }
+        if (removedIdentifier) {
+            mgrStore.set('idMap', idMap);
+            console.log('[manager] remove: cleared idMap[%s]=%s', removedIdentifier, appId);
+        }
+
+        // 同步更新仓库列表：清除匹配仓库的 installedAppId / toUpdate
+        const repos = getAllRepos();
+        let reposChanged = false;
+        for (const repo of Object.values(repos)) {
+            const repoIdentifier = repo.appId || repo.name;
+            if (repoIdentifier === removedIdentifier || repo.installedAppId === appId) {
+                if (repo.installedAppId || repo.toUpdate) {
+                    repo.installedAppId = null;
+                    repo.toUpdate = false;
+                    repo.updatedAt = Date.now();
+                    reposChanged = true;
+                }
+            }
+        }
+        if (reposChanged) {
+            saveAllRepos(repos);
+            console.log('[manager] remove: synced repos installedAppId');
+        }
+
         return { success: true };
     } catch (e) {
         console.error('[manager] remove failed:', e);
@@ -275,7 +319,13 @@ ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
     try {
         if (fs.existsSync(dataDir)) {
             const originalFs = require('original-fs');
-            originalFs.rmSync(dataDir, { recursive: true, force: true });
+            // 清理数据：删除目录内所有内容，但保留目录本身
+            // （store/db 等子目录会被清空，APP 重启后自动重建）
+            const entries = originalFs.readdirSync(dataDir);
+            for (const entry of entries) {
+                originalFs.rmSync(path.join(dataDir, entry), { recursive: true, force: true });
+            }
+            console.log('[manager] clearData: cleared contents of %s', dataDir);
         }
         return { success: true };
     } catch (e) {
