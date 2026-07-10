@@ -207,6 +207,7 @@ function readAppInfo(appId) {
         return {
             appId,
             name: pkg.displayName || pkg.name || appId,
+            wmClass: pkg.name || appId,
             description: pkg.description || '',
             logo
         };

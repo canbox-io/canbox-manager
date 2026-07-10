@@ -83,7 +83,7 @@ function generateLauncher(appInfo) {
         return { success: true, skipped: true };
     }
 
-    const { appId, name, description } = appInfo;
+    const { appId, name, description, wmClass } = appInfo;
     const launcherName = getLauncherName(name);
     const launcherPath = getLauncherPath(name);
 
@@ -117,6 +117,8 @@ Exec="${binPath}" ${args}
 ${iconPath ? `Icon=${iconPath}` : ''}
 Type=Application
 Terminal=false
+StartupNotify=true
+StartupWMClass=${wmClass || name}
 `;
             fs.writeFileSync(launcherPath, desktopFile);
             fs.chmodSync(launcherPath, 0o755);
