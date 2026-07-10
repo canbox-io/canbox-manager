@@ -27,83 +27,14 @@ const fs = require('fs');
 const AdmZip = require('adm-zip');
 const { customAlphabet } = require('nanoid');
 
-// 自动禁用 sandbox（AppImage 在某些 Linux 环境下 sandbox 无法工作）
-// 这样用户启动时不需要手动加 --no-sandbox 参数
+// 自动禁用 sandbox（某些 Linux 环境下 sandbox 无法工作）
 app.commandLine.appendSwitch('no-sandbox');
 
-// 加载 canbox-core injection.js
-// 开发模式：通过 electron -r 参数已预加载（见 package.json scripts.start）
-// 打包模式：从 extraResources 手动加载（用户运行打包应用时不传 -r）
-if (app.isPackaged) {
-    require(path.join(process.resourcesPath, 'canbox-core', 'injection.js'));
-}
-
-// 获取 canbox-core 注入的环境信息（injection.js 通过 global 挂载）
+// canbox-core 的 injection.js 通过 electron -r 参数预加载，
+// 已完成环境初始化和 API 注册，通过 global 挂载 env 和 corePath。
 const env = global.__CANBOX_ENV__;
 const USERS_PATH = env.usersPath;
-// canbox-core 根目录路径（用于 require store 等模块）
 const CORE_PATH = global.__CANBOX_CORE_PATH__;
-
-// ====== APP 运行模式（打包模式专用） ======
-// 打包后的 electron 可执行文件不支持通过位置参数加载不同 APP（开发模式下
-// `electron -r injection.js /path/to/app.asar` 可行，但打包后 process.execPath
-// 总是加载自身的 resources/app.asar）。
-// 因此打包模式下通过 --canbox-run-app 参数触发 APP 运行模式：
-//   1. manager 内点击运行：spawn(execPath, ['--canbox-run-app=path', '--app-id=xxx'])
-//   2. desktop 快捷方式启动：--launch-app-id=xxx 转换为 APP 运行模式
-// 两种方式都在当前进程内加载 injection.js + APP main.js，不创建 manager 窗口。
-const runAppArg = process.argv.find(a => a.startsWith('--canbox-run-app='));
-const launchAppArg = process.argv.find(a => a.startsWith('--launch-app-id='));
-
-if (runAppArg || launchAppArg) {
-    let targetAppPath;
-    let runAppId;
-
-    if (runAppArg) {
-        // manager 内点击运行，直接传了 APP 路径
-        targetAppPath = runAppArg.split('=')[1];
-        const appIdArg = process.argv.find(a => a.startsWith('--app-id='));
-        runAppId = appIdArg ? appIdArg.split('=')[1] : 'unknown';
-    } else {
-        // desktop 快捷方式启动，需要从 appId 查找 APP 路径
-        runAppId = launchAppArg.split('=')[1];
-        // 补充 --app-id 参数，供 injection.js 的 env 模块使用
-        if (!process.argv.find(a => a.startsWith('--app-id='))) {
-            process.argv.push(`--app-id=${runAppId}`);
-        }
-        const appDir = path.join(USERS_PATH, 'apps', runAppId);
-        const asarPath = path.join(appDir, 'app.asar');
-        targetAppPath = fs.existsSync(asarPath) ? asarPath : appDir;
-    }
-
-    if (!fs.existsSync(targetAppPath)) {
-        console.error('[canbox-run-app] APP 路径不存在:', targetAppPath);
-        app.quit();
-        return;
-    }
-
-    console.log('[canbox-run-app] APP 运行模式:', runAppId, '路径:', targetAppPath);
-
-    app.whenReady().then(() => {
-        try {
-            const appPkg = require(path.join(targetAppPath, 'package.json'));
-            const appMain = path.resolve(targetAppPath, appPkg.main || 'main.js');
-            console.log('[canbox-run-app] 加载 APP main:', appMain);
-            require(appMain);
-            console.log('[canbox-run-app] APP 加载成功');
-        } catch (e) {
-            console.error('[canbox-run-app] 加载 APP 失败:', e);
-            app.quit();
-        }
-    });
-
-    app.on('window-all-closed', () => {
-        app.quit();
-    });
-
-    // APP 运行模式：不执行后续 manager 代码
-    return;
-}
 
 const repoProbe = require('./repo-probe');
 const appLauncher = require('./app-launcher');
@@ -366,36 +297,23 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
         const asarPath = path.join(appDir, 'app.asar');
         const target = fs.existsSync(asarPath) ? asarPath : appDir;
 
-        let child;
-        if (app.isPackaged) {
-            // 打包模式：通过 --canbox-run-app 参数触发 APP 运行模式
-            // （打包后 electron 可执行文件不支持位置参数加载不同 APP）
-            child = spawn(process.execPath, [
-                `--canbox-run-app=${target}`,
-                `--app-id=${appId}`,
-                '--no-sandbox'
-            ], {
-                detached: true,
-                stdio: 'ignore',
-                env: { ...process.env, NODE_ENV: 'production' }
-            });
-        } else {
-            // 开发模式：用 electron -r injection.js target
-            const coreInjection = path.join(CORE_PATH, 'injection.js');
-            child = spawn(process.execPath, [
-                '-r', coreInjection,
-                target,
-                `--app-id=${appId}`,
-                '--no-sandbox'
-            ], {
-                detached: true,
-                stdio: 'ignore',
-                env: { ...process.env, NODE_ENV: 'production' }
-            });
-        }
+        // 统一启动方式：electron -r core/injection.js <target> --app-id=<id> --no-sandbox
+        // 开发和生产行为一致，每个 APP 是独立 electron 进程，加载自己的 package.json，
+        // WM_CLASS 由 APP 的 package.json name 决定，窗口正确分离。
+        const coreInjection = path.join(CORE_PATH, 'injection.js');
+        const child = spawn(process.execPath, [
+            '-r', coreInjection,
+            target,
+            `--app-id=${appId}`,
+            '--no-sandbox'
+        ], {
+            detached: true,
+            stdio: 'ignore',
+            env: { ...process.env, NODE_ENV: 'production' }
+        });
         child.unref();
 
-        console.log('[manager] 启动 APP:', appId, 'pid=', child.pid, '打包模式:', app.isPackaged);
+        console.log('[manager] 启动 APP:', appId, 'pid=', child.pid, 'electron=', process.execPath);
         return { success: true };
     } catch (e) {
         console.error('[manager] 启动 APP 异常:', appId, e.message);
@@ -790,7 +708,6 @@ ipcMain.handle('manager.appReady', () => {
 console.time('[startup] 等待 app.whenReady');
 
 // 正常启动 manager 窗口
-// （APP 运行模式 --canbox-run-app / --launch-app-id 已在文件开头处理并 return）
 app.whenReady().then(() => {
     console.timeEnd('[startup] 等待 app.whenReady');
     Menu.setApplicationMenu(null);

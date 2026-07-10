@@ -1,13 +1,12 @@
 /**
  * canbox-manager — APP 启动器文件管理
  *
- * 在生产模式（app.isPackaged()）下，为已安装的 APP 生成系统快捷方式：
+ * 在生产模式（CANBOX_ENV=production，由 bin/canbox 设置）下，为已安装的 APP 生成系统快捷方式：
  *   Linux:   ~/.local/share/applications/canbox-{name}.desktop
  *   Windows: %APPDATA%/Microsoft/Windows/Start Menu/Programs/canbox-{name}.lnk
- *   macOS:   /Applications/canbox-{name}.app (alias)
  *
- * launcher 指向 manager 可执行文件，通过 --launch-app-id 参数启动对应 APP。
- * manager 收到此参数后 spawn APP 然后立即退出（不显示 manager 窗口）。
+ * launcher 指向 bin/canbox（或 bin/canbox.bat），通过 `app <appId>` 参数启动对应 APP。
+ * bin/canbox 内部执行: electron -r core/injection.js <app.asar> --app-id=<id> --no-sandbox
  */
 
 const path = require('path');
@@ -17,14 +16,19 @@ const { execSync } = require('child_process');
 
 /**
  * 判断当前是否应写 launcher（仅生产模式）
+ * 生产模式由 bin/canbox 设置 CANBOX_ENV=production 环境变量
  */
 function shouldWriteLauncher() {
-    try {
-        const { app } = require('electron');
-        return app.isPackaged;
-    } catch (e) {
-        return false;
-    }
+    return process.env.CANBOX_ENV === 'production';
+}
+
+/**
+ * 获取 bin/canbox 启动器路径
+ * 生产模式下 __dirname 是 {CANBOX_HOME}/manager/，bin/canbox 在 {CANBOX_HOME}/bin/
+ */
+function getBinLauncherPath() {
+    const ext = process.platform === 'win32' ? 'canbox.bat' : 'canbox';
+    return path.join(__dirname, '..', 'bin', ext);
 }
 
 /**
@@ -42,8 +46,6 @@ function getLauncherPath(appName) {
     if (process.platform === 'win32') {
         const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
         return path.join(programsPath, `${launcherName}.lnk`);
-    } else if (process.platform === 'darwin') {
-        return path.join('/Applications', `${launcherName}.app`);
     } else {
         const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
         return path.join(applicationsPath, `${launcherName}.desktop`);
@@ -90,8 +92,8 @@ function generateLauncher(appInfo) {
         return { success: true, skipped: true };
     }
 
-    const execPath = process.env.APPIMAGE || process.execPath;
-    const args = `--launch-app-id=${appId}`;
+    const binPath = getBinLauncherPath();
+    const args = `app ${appId}`;
     const iconPath = getIconPath(appId, appInfo.logo);
 
     console.log('[app-launcher] 生成 APP launcher:', name, '路径:', launcherPath);
@@ -100,30 +102,24 @@ function generateLauncher(appInfo) {
         if (process.platform === 'win32') {
             const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
             if (!fs.existsSync(programsPath)) fs.mkdirSync(programsPath, { recursive: true });
-            const launcherPath = path.join(programsPath, `${launcherName}.lnk`);
-            const escapedTarget = execPath.replace(/\\/g, '\\\\');
-            const escapedArgs = args;
+            const escapedTarget = binPath.replace(/\\/g, '\\\\');
             const escapedIcon = iconPath ? iconPath.replace(/\\/g, '\\\\') : '';
-            const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; $s.Arguments = '${escapedArgs}'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
+            const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; $s.Arguments = '${args}'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
             execSync(cmd);
-        } else if (process.platform === 'darwin') {
-            // macOS: 创建 alias 到 /Applications
-            const target = `"${execPath}" ${args}`;
-            execSync(`osascript -e 'tell application "Finder" to make alias file to POSIX file ${target} at POSIX file "/Applications"'`);
         } else {
             // Linux: .desktop 文件
             const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
             if (!fs.existsSync(applicationsPath)) fs.mkdirSync(applicationsPath, { recursive: true });
-            const launcherPath = path.join(applicationsPath, `${launcherName}.desktop`);
             const desktopFile = `[Desktop Entry]
 Name=${launcherName}
 Comment=${description || ''}
-Exec="${execPath}" ${args}
+Exec="${binPath}" ${args}
 ${iconPath ? `Icon=${iconPath}` : ''}
 Type=Application
 Terminal=false
 `;
             fs.writeFileSync(launcherPath, desktopFile);
+            fs.chmodSync(launcherPath, 0o755);
         }
         return { success: true };
     } catch (e) {
@@ -141,17 +137,11 @@ function deleteLauncher(appName) {
         return { success: true, skipped: true };
     }
 
-    const launcherName = getLauncherName(appName);
     const launcherPath = getLauncherPath(appName);
 
     try {
         if (fs.existsSync(launcherPath)) {
-            if (process.platform === 'darwin') {
-                // macOS alias 需要用 trash
-                execSync(`rm -rf "${launcherPath}"`);
-            } else {
-                fs.unlinkSync(launcherPath);
-            }
+            fs.unlinkSync(launcherPath);
         }
         return { success: true };
     } catch (e) {
@@ -166,8 +156,6 @@ function getManagerLauncherPath() {
     if (process.platform === 'win32') {
         const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
         return path.join(programsPath, 'Canbox.lnk');
-    } else if (process.platform === 'darwin') {
-        return path.join('/Applications', 'Canbox.app');
     } else {
         const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
         return path.join(applicationsPath, 'canbox.desktop');
@@ -191,12 +179,13 @@ function generateManagerLauncher() {
         return { success: true, skipped: true };
     }
 
-    const execPath = process.env.APPIMAGE || process.execPath;
+    const binPath = getBinLauncherPath();
+
+    // 从 manager 目录复制图标到外部缓存目录（desktop 环境需要可访问的图标路径）
+    let iconPath = '';
     const iconDir = path.join(os.homedir(), '.local', 'share', 'canbox', 'icons');
     if (!fs.existsSync(iconDir)) fs.mkdirSync(iconDir, { recursive: true });
 
-    // 从 app.asar 内复制图标到外部缓存目录（desktop 环境无法读取 asar 内文件）
-    let iconPath = '';
     const iconSources = [
         path.join(__dirname, 'icons', '512.png'),
         path.join(__dirname, 'icons', '256.png'),
@@ -221,22 +210,19 @@ function generateManagerLauncher() {
         if (process.platform === 'win32') {
             const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
             if (!fs.existsSync(programsPath)) fs.mkdirSync(programsPath, { recursive: true });
-            const escapedTarget = execPath.replace(/\\/g, '\\\\');
+            const escapedTarget = binPath.replace(/\\/g, '\\\\');
             const escapedIcon = iconPath ? iconPath.replace(/\\/g, '\\\\') : '';
-            const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
+            const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; $s.Arguments = 'manager'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
             execSync(cmd);
-        } else if (process.platform === 'darwin') {
-            execSync(`osascript -e 'tell application "Finder" to make alias file to POSIX file "${execPath}" at POSIX file "/Applications"'`);
         } else {
             const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
             if (!fs.existsSync(applicationsPath)) fs.mkdirSync(applicationsPath, { recursive: true });
             // StartupWMClass 必须与窗口实际 WM_CLASS 一致。
-            // Electron Linux 的 WM_CLASS 由 package.json 的 name 字段决定（=canbox-manager），
-            // 非可执行文件名，也非 app.setName()，故此处填 canbox-manager。
+            // Electron Linux 的 WM_CLASS 由 package.json 的 name 字段决定（=canbox-manager）。
             const desktopFile = `[Desktop Entry]
 Name=Canbox
 Comment=Canbox 应用集合平台
-Exec="${execPath}" %U
+Exec="${binPath}" manager
 ${iconPath ? `Icon=${iconPath}` : ''}
 Type=Application
 Categories=Utility;Development;

@@ -1,0 +1,74 @@
+#!/bin/bash
+# Canbox 启动器
+# 用法: canbox manager | canbox app <appId>
+#
+# 由安装脚本生成 desktop/lnk 快捷方式时调用，也可手动执行。
+# CANBOX_HOME 通过脚本位置自动推导，支持安装到任意路径。
+
+set -e
+
+# 推导 CANBOX_HOME（脚本所在目录的上级目录）
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+CANBOX_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+ELECTRON="$CANBOX_HOME/electron/electron"
+CORE="$CANBOX_HOME/canbox-core/injection.js"
+
+# 检查 electron 二进制是否存在
+if [ ! -f "$ELECTRON" ]; then
+    echo "[canbox] 错误: 找不到 electron 二进制: $ELECTRON" >&2
+    exit 1
+fi
+
+# 检查 injection.js 是否存在
+if [ ! -f "$CORE" ]; then
+    echo "[canbox] 错误: 找不到 canbox-core: $CORE" >&2
+    exit 1
+fi
+
+export CANBOX_ENV=production
+export NODE_ENV=production
+
+# 解析用户数据目录（与 canbox-core/lib/env.js 的逻辑一致）
+# 优先级: CANBOX_USER_DATA > CANBOX_HOME(env) > ~/.config/canbox (Linux) / ~/Library/Application Support/canbox (macOS)
+USER_DATA="${CANBOX_USER_DATA:-${CANBOX_HOME_ENV:-$HOME/.config/canbox}}"
+
+# 从 {userData}/paths.json 读取 usersPath
+USERS_PATH=""
+PATHS_JSON="$USER_DATA/paths.json"
+if [ -f "$PATHS_JSON" ]; then
+    USERS_PATH=$(grep -o '"usersPath"[[:space:]]*:[[:space:]]*"[^"]*"' "$PATHS_JSON" | head -1 | sed 's/.*: *"//;s/".*$//')
+fi
+# 回退到默认值
+if [ -z "$USERS_PATH" ]; then
+    USERS_PATH="$USER_DATA/Users"
+fi
+
+case "${1:-}" in
+    manager)
+        exec "$ELECTRON" -r "$CORE" "$CANBOX_HOME/manager/" --app-id=canbox-manager --no-sandbox
+        ;;
+    app)
+        APP_ID="$2"
+        if [ -z "$APP_ID" ]; then
+            echo "用法: canbox app <appId>" >&2
+            exit 1
+        fi
+        APP_DIR="$USERS_PATH/apps/$APP_ID"
+        # 优先加载 app.asar，兼容源码目录模式
+        if [ -f "$APP_DIR/app.asar" ]; then
+            APP_TARGET="$APP_DIR/app.asar"
+        elif [ -d "$APP_DIR" ]; then
+            APP_TARGET="$APP_DIR/"
+        else
+            echo "[canbox] 错误: APP 不存在: $APP_ID (路径: $APP_DIR)" >&2
+            exit 1
+        fi
+        exec "$ELECTRON" -r "$CORE" "$APP_TARGET" "--app-id=$APP_ID" --no-sandbox
+        ;;
+    *)
+        echo "Canbox 启动器" >&2
+        echo "用法: canbox manager | canbox app <appId>" >&2
+        exit 1
+        ;;
+esac
