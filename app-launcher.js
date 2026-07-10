@@ -230,6 +230,9 @@ function generateManagerLauncher() {
         } else {
             const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
             if (!fs.existsSync(applicationsPath)) fs.mkdirSync(applicationsPath, { recursive: true });
+            // StartupWMClass 必须与窗口实际 WM_CLASS 一致。
+            // Electron Linux 的 WM_CLASS 由 package.json 的 name 字段决定（=canbox-manager），
+            // 非可执行文件名，也非 app.setName()，故此处填 canbox-manager。
             const desktopFile = `[Desktop Entry]
 Name=Canbox
 Comment=Canbox 应用集合平台
@@ -239,7 +242,7 @@ Type=Application
 Categories=Utility;Development;
 Terminal=false
 StartupNotify=true
-StartupWMClass=Canbox
+StartupWMClass=canbox-manager
 `;
             fs.writeFileSync(launcherPath, desktopFile);
             fs.chmodSync(launcherPath, 0o755);

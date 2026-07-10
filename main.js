@@ -22,6 +22,10 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+// 第三方依赖必须在顶部 require：importAppFromZip 中会设置 process.noAsar=true，
+// 若在其后才 require（如 adm-zip/nanoid），会因 asar 补丁被禁用而无法从 app.asar 加载。
+const AdmZip = require('adm-zip');
+const { customAlphabet } = require('nanoid');
 
 // 自动禁用 sandbox（AppImage 在某些 Linux 环境下 sandbox 无法工作）
 // 这样用户启动时不需要手动加 --no-sandbox 参数
@@ -112,7 +116,6 @@ let mainWindow = null;
 
 // 生成随机 appId（8 位小写字母+数字）
 function generateAppId() {
-    const { customAlphabet } = require('nanoid');
     return customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 8)();
 }
 
@@ -197,7 +200,6 @@ async function importAppFromZip(zipPath) {
     const prevNoAsar = process.noAsar;
     process.noAsar = true;
     try {
-        const AdmZip = require('adm-zip');
         const zip = new AdmZip(zipPath);
         tempDir = path.join(os.tmpdir(), `canbox-import-${Date.now()}`);
         zip.extractAllTo(tempDir, true);
