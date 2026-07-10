@@ -23,11 +23,79 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
-// 获取 canbox-core 注入的环境信息（injection.js 通过 -r 预加载时挂到 global）
+// 加载 canbox-core injection.js
+// 开发模式：通过 electron -r 参数已预加载（见 package.json scripts.start）
+// 打包模式：从 extraResources 手动加载（用户运行打包应用时不传 -r）
+if (app.isPackaged) {
+    require(path.join(process.resourcesPath, 'canbox-core', 'injection.js'));
+}
+
+// 获取 canbox-core 注入的环境信息（injection.js 通过 global 挂载）
 const env = global.__CANBOX_ENV__;
 const USERS_PATH = env.usersPath;
 // canbox-core 根目录路径（用于 require store 等模块）
 const CORE_PATH = global.__CANBOX_CORE_PATH__;
+
+// ====== APP 运行模式（打包模式专用） ======
+// 打包后的 electron 可执行文件不支持通过位置参数加载不同 APP（开发模式下
+// `electron -r injection.js /path/to/app.asar` 可行，但打包后 process.execPath
+// 总是加载自身的 resources/app.asar）。
+// 因此打包模式下通过 --canbox-run-app 参数触发 APP 运行模式：
+//   1. manager 内点击运行：spawn(execPath, ['--canbox-run-app=path', '--app-id=xxx'])
+//   2. desktop 快捷方式启动：--launch-app-id=xxx 转换为 APP 运行模式
+// 两种方式都在当前进程内加载 injection.js + APP main.js，不创建 manager 窗口。
+const runAppArg = process.argv.find(a => a.startsWith('--canbox-run-app='));
+const launchAppArg = process.argv.find(a => a.startsWith('--launch-app-id='));
+
+if (runAppArg || launchAppArg) {
+    let targetAppPath;
+    let runAppId;
+
+    if (runAppArg) {
+        // manager 内点击运行，直接传了 APP 路径
+        targetAppPath = runAppArg.split('=')[1];
+        const appIdArg = process.argv.find(a => a.startsWith('--app-id='));
+        runAppId = appIdArg ? appIdArg.split('=')[1] : 'unknown';
+    } else {
+        // desktop 快捷方式启动，需要从 appId 查找 APP 路径
+        runAppId = launchAppArg.split('=')[1];
+        // 补充 --app-id 参数，供 injection.js 的 env 模块使用
+        if (!process.argv.find(a => a.startsWith('--app-id='))) {
+            process.argv.push(`--app-id=${runAppId}`);
+        }
+        const appDir = path.join(USERS_PATH, 'apps', runAppId);
+        const asarPath = path.join(appDir, 'app.asar');
+        targetAppPath = fs.existsSync(asarPath) ? asarPath : appDir;
+    }
+
+    if (!fs.existsSync(targetAppPath)) {
+        console.error('[canbox-run-app] APP 路径不存在:', targetAppPath);
+        app.quit();
+        return;
+    }
+
+    console.log('[canbox-run-app] APP 运行模式:', runAppId, '路径:', targetAppPath);
+
+    app.whenReady().then(() => {
+        try {
+            const appPkg = require(path.join(targetAppPath, 'package.json'));
+            const appMain = path.resolve(targetAppPath, appPkg.main || 'main.js');
+            console.log('[canbox-run-app] 加载 APP main:', appMain);
+            require(appMain);
+            console.log('[canbox-run-app] APP 加载成功');
+        } catch (e) {
+            console.error('[canbox-run-app] 加载 APP 失败:', e);
+            app.quit();
+        }
+    });
+
+    app.on('window-all-closed', () => {
+        app.quit();
+    });
+
+    // APP 运行模式：不执行后续 manager 代码
+    return;
+}
 
 const repoProbe = require('./repo-probe');
 const appLauncher = require('./app-launcher');
@@ -283,32 +351,48 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
     const appDir = path.join(USERS_PATH, 'apps', appId);
 
     if (!fs.existsSync(appDir)) {
+        console.error('[manager] 启动 APP 失败: 目录不存在', appId);
         return { success: false, error: 'APP not found' };
     }
 
     try {
-        const coreInjection = path.join(global.__CANBOX_CORE_PATH__, 'injection.js');
-
         // 优先启动 app.asar，兼容源码目录模式
         const asarPath = path.join(appDir, 'app.asar');
         const target = fs.existsSync(asarPath) ? asarPath : appDir;
 
-        const child = spawn(process.execPath, [
-            '-r', coreInjection,
-            target,
-            `--app-id=${appId}`,
-            '--no-sandbox'
-        ], {
-            detached: true,
-            stdio: 'ignore',
-            // 清除 NODE_ENV，避免 manager 开发模式的 NODE_ENV=development 被子进程继承
-            // 导致 APP 误判为开发模式（打开 devTools、加载 devServer 等）
-            env: { ...process.env, NODE_ENV: 'production' }
-        });
+        let child;
+        if (app.isPackaged) {
+            // 打包模式：通过 --canbox-run-app 参数触发 APP 运行模式
+            // （打包后 electron 可执行文件不支持位置参数加载不同 APP）
+            child = spawn(process.execPath, [
+                `--canbox-run-app=${target}`,
+                `--app-id=${appId}`,
+                '--no-sandbox'
+            ], {
+                detached: true,
+                stdio: 'ignore',
+                env: { ...process.env, NODE_ENV: 'production' }
+            });
+        } else {
+            // 开发模式：用 electron -r injection.js target
+            const coreInjection = path.join(CORE_PATH, 'injection.js');
+            child = spawn(process.execPath, [
+                '-r', coreInjection,
+                target,
+                `--app-id=${appId}`,
+                '--no-sandbox'
+            ], {
+                detached: true,
+                stdio: 'ignore',
+                env: { ...process.env, NODE_ENV: 'production' }
+            });
+        }
         child.unref();
 
+        console.log('[manager] 启动 APP:', appId, 'pid=', child.pid, '打包模式:', app.isPackaged);
         return { success: true };
     } catch (e) {
+        console.error('[manager] 启动 APP 异常:', appId, e.message);
         return { success: false, error: e.message };
     }
 });
@@ -699,47 +783,13 @@ ipcMain.handle('manager.appReady', () => {
 
 console.time('[startup] 等待 app.whenReady');
 
-// 检查 --launch-app-id 参数：launcher 启动模式，启动指定 APP 后立即退出
-const launchArg = process.argv.find(a => a.startsWith('--launch-app-id='));
-if (launchArg) {
-    const launchAppId = launchArg.split('=')[1];
-    app.whenReady().then(() => {
-        try {
-            const appDir = path.join(USERS_PATH, 'apps', launchAppId);
-            if (!fs.existsSync(appDir)) {
-                console.error('[launcher] APP not found:', launchAppId);
-                app.quit();
-                return;
-            }
-            const coreInjection = path.join(CORE_PATH, 'injection.js');
-            const asarPath = path.join(appDir, 'app.asar');
-            const target = fs.existsSync(asarPath) ? asarPath : appDir;
-            const child = spawn(process.execPath, [
-                '-r', coreInjection,
-                target,
-                `--app-id=${launchAppId}`,
-                '--no-sandbox'
-            ], {
-                detached: true,
-                stdio: 'ignore',
-                env: { ...process.env, NODE_ENV: 'production' }
-            });
-            child.unref();
-            console.log('[launcher] spawned APP', launchAppId, 'pid=', child.pid);
-        } catch (e) {
-            console.error('[launcher] failed:', e);
-        } finally {
-            // 立即退出 manager，不显示窗口
-            app.quit();
-        }
-    });
-} else {
-    app.whenReady().then(() => {
-        console.timeEnd('[startup] 等待 app.whenReady');
-        Menu.setApplicationMenu(null);
-        createWindow();
-    });
-}
+// 正常启动 manager 窗口
+// （APP 运行模式 --canbox-run-app / --launch-app-id 已在文件开头处理并 return）
+app.whenReady().then(() => {
+    console.timeEnd('[startup] 等待 app.whenReady');
+    Menu.setApplicationMenu(null);
+    createWindow();
+});
 
 app.on('window-all-closed', () => {
     app.quit();
