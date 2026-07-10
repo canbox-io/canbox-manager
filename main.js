@@ -23,6 +23,10 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
+// 自动禁用 sandbox（AppImage 在某些 Linux 环境下 sandbox 无法工作）
+// 这样用户启动时不需要手动加 --no-sandbox 参数
+app.commandLine.appendSwitch('no-sandbox');
+
 // 加载 canbox-core injection.js
 // 开发模式：通过 electron -r 参数已预加载（见 package.json scripts.start）
 // 打包模式：从 extraResources 手动加载（用户运行打包应用时不传 -r）
@@ -788,6 +792,8 @@ console.time('[startup] 等待 app.whenReady');
 app.whenReady().then(() => {
     console.timeEnd('[startup] 等待 app.whenReady');
     Menu.setApplicationMenu(null);
+    // 生产模式下生成 manager 自身 launcher（已存在则跳过）
+    appLauncher.generateManagerLauncher();
     createWindow();
 });
 

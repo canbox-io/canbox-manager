@@ -83,9 +83,18 @@ function generateLauncher(appInfo) {
 
     const { appId, name, description } = appInfo;
     const launcherName = getLauncherName(name);
+    const launcherPath = getLauncherPath(name);
+
+    // 已存在则跳过，避免重复生成
+    if (fs.existsSync(launcherPath)) {
+        return { success: true, skipped: true };
+    }
+
     const execPath = process.env.APPIMAGE || process.execPath;
-    const args = `--launch-app-id=${appId} --no-sandbox`;
+    const args = `--launch-app-id=${appId}`;
     const iconPath = getIconPath(appId, appInfo.logo);
+
+    console.log('[app-launcher] 生成 APP launcher:', name, '路径:', launcherPath);
 
     try {
         if (process.platform === 'win32') {
@@ -150,9 +159,103 @@ function deleteLauncher(appName) {
     }
 }
 
+/**
+ * 获取 manager 自身 launcher 路径
+ */
+function getManagerLauncherPath() {
+    if (process.platform === 'win32') {
+        const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+        return path.join(programsPath, 'Canbox.lnk');
+    } else if (process.platform === 'darwin') {
+        return path.join('/Applications', 'Canbox.app');
+    } else {
+        const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
+        return path.join(applicationsPath, 'canbox.desktop');
+    }
+}
+
+/**
+ * 生成 manager 自身的 launcher（出现在系统应用菜单中）
+ * 启动时检查，已存在则跳过
+ * @returns {Object} { success, skipped?, error? }
+ */
+function generateManagerLauncher() {
+    if (!shouldWriteLauncher()) {
+        return { success: true, skipped: true };
+    }
+
+    const launcherPath = getManagerLauncherPath();
+
+    // 已存在则跳过
+    if (fs.existsSync(launcherPath)) {
+        return { success: true, skipped: true };
+    }
+
+    const execPath = process.env.APPIMAGE || process.execPath;
+    const iconDir = path.join(os.homedir(), '.local', 'share', 'canbox', 'icons');
+    if (!fs.existsSync(iconDir)) fs.mkdirSync(iconDir, { recursive: true });
+
+    // 从 app.asar 内复制图标到外部缓存目录（desktop 环境无法读取 asar 内文件）
+    let iconPath = '';
+    const iconSources = [
+        path.join(__dirname, 'icons', '512.png'),
+        path.join(__dirname, 'icons', '256.png'),
+        path.join(__dirname, 'logo.png')
+    ];
+    for (const src of iconSources) {
+        if (fs.existsSync(src)) {
+            try {
+                iconPath = path.join(iconDir, 'canbox.png');
+                fs.copyFileSync(src, iconPath);
+                break;
+            } catch (e) {
+                console.error('[app-launcher] 复制 manager 图标失败:', e.message);
+                iconPath = '';
+            }
+        }
+    }
+
+    console.log('[app-launcher] 生成 manager launcher, 路径:', launcherPath);
+
+    try {
+        if (process.platform === 'win32') {
+            const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+            if (!fs.existsSync(programsPath)) fs.mkdirSync(programsPath, { recursive: true });
+            const escapedTarget = execPath.replace(/\\/g, '\\\\');
+            const escapedIcon = iconPath ? iconPath.replace(/\\/g, '\\\\') : '';
+            const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
+            execSync(cmd);
+        } else if (process.platform === 'darwin') {
+            execSync(`osascript -e 'tell application "Finder" to make alias file to POSIX file "${execPath}" at POSIX file "/Applications"'`);
+        } else {
+            const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
+            if (!fs.existsSync(applicationsPath)) fs.mkdirSync(applicationsPath, { recursive: true });
+            const desktopFile = `[Desktop Entry]
+Name=Canbox
+Comment=Canbox 应用集合平台
+Exec="${execPath}" %U
+${iconPath ? `Icon=${iconPath}` : ''}
+Type=Application
+Categories=Utility;Development;
+Terminal=false
+StartupNotify=true
+StartupWMClass=Canbox
+`;
+            fs.writeFileSync(launcherPath, desktopFile);
+            fs.chmodSync(launcherPath, 0o755);
+        }
+        console.log('[app-launcher] manager launcher 生成成功');
+        return { success: true };
+    } catch (e) {
+        console.error('[app-launcher] manager launcher 生成失败:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
 module.exports = {
     shouldWriteLauncher,
     getLauncherPath,
     generateLauncher,
-    deleteLauncher
+    deleteLauncher,
+    generateManagerLauncher
 };
