@@ -647,12 +647,86 @@ ipcMain.handle('manager.zoom.reset', async () => {
 
 // ====== 窗口创建 ======
 
+// 获取窗口状态 store（按 appId 物理隔离，黑盒式）
+function getWinStateStore() {
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
+    return store.getStore('canbox-manager', 'winState', path.join(USERS_PATH, 'data'));
+}
+
+// 保存窗口状态（含位置、大小、最大化、全屏）
+// 节流 300ms，避免 resize/move 高频写盘
+let winStateSaveTimer = null;
+function saveWindowState() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (winStateSaveTimer) clearTimeout(winStateSaveTimer);
+    winStateSaveTimer = setTimeout(() => {
+        try {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            const store = getWinStateStore();
+            // 最大化或全屏时只存状态，不存 bounds（否则会把巨大化的尺寸当默认值）
+            const isMaximized = mainWindow.isMaximized();
+            const isFullScreen = mainWindow.isFullScreen();
+            const bounds = (isMaximized || isFullScreen) ? null : mainWindow.getBounds();
+            store.set('state', {
+                bounds,
+                isMaximized,
+                isFullScreen
+            });
+        } catch (e) {
+            // 忽略保存失败
+        }
+    }, 300);
+}
+
+// 读取并校验上次窗口状态（多显示器边界校验，窗口在屏幕外则丢弃 x/y）
+function loadWindowState() {
+    const { screen } = require('electron');
+    const store = getWinStateStore();
+    const state = store.get('state');
+    if (!state) return null;
+
+    if (state.isMaximized || state.isFullScreen || !state.bounds) {
+        return { isMaximized: !!state.isMaximized, isFullScreen: !!state.isFullScreen };
+    }
+
+    // 校验 bounds 是否在某个显示器可视范围内
+    const bounds = state.bounds;
+    const display = screen.getDisplayMatching(bounds);
+    const visibleArea = display.workArea;
+    const isVisible =
+        bounds.x + bounds.width > visibleArea.x &&
+        bounds.x < visibleArea.x + visibleArea.width &&
+        bounds.y + bounds.height > visibleArea.y &&
+        bounds.y < visibleArea.y + visibleArea.height;
+
+    if (!isVisible) {
+        // 窗口在屏幕外（如副屏已拔除），丢弃位置只保留尺寸
+        return { width: bounds.width, height: bounds.height };
+    }
+
+    return {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        isMaximized: false,
+        isFullScreen: false
+    };
+}
+
 function createWindow() {
     console.time('[startup] BrowserWindow 创建');
 
+    // 恢复上次窗口状态
+    const saved = loadWindowState();
+    const defaultWidth = 960;
+    const defaultHeight = 680;
+
     mainWindow = new BrowserWindow({
-        width: 960,
-        height: 680,
+        width: (saved && saved.width) || defaultWidth,
+        height: (saved && saved.height) || defaultHeight,
+        x: (saved && saved.x !== undefined) ? saved.x : undefined,
+        y: (saved && saved.y !== undefined) ? saved.y : undefined,
         minWidth: 800,
         minHeight: 600,
         title: 'Canbox Manager',
@@ -678,6 +752,22 @@ function createWindow() {
     } else {
         mainWindow.loadFile(path.join(__dirname, 'build', 'index.html'));
     }
+
+    // 恢复最大化 / 全屏状态（需在窗口 show 之后才生效）
+    if (saved && saved.isMaximized) {
+        mainWindow.maximize();
+    } else if (saved && saved.isFullScreen) {
+        mainWindow.setFullScreen(true);
+    }
+
+    // 监听窗口状态变化，节流持久化（resize/move/close 都会触发）
+    mainWindow.on('resize', saveWindowState);
+    mainWindow.on('move', saveWindowState);
+    mainWindow.on('maximize', saveWindowState);
+    mainWindow.on('unmaximize', saveWindowState);
+    mainWindow.on('enter-full-screen', saveWindowState);
+    mainWindow.on('leave-full-screen', saveWindowState);
+    mainWindow.on('close', saveWindowState);
 
     // 应用保存的缩放比例（dom-ready 后设置，避免闪烁）
     mainWindow.webContents.on('dom-ready', () => {
