@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import logoUrl from '../../logo.svg';
 
 const { t } = useI18n();
 
@@ -23,6 +24,14 @@ const infoItems = [
     { key: 'chromeVersion', value: () => platformInfo.value ? `Chromium ${platformInfo.value.chromeVersion}` : '-', i18n: 'about.chromeVersion' },
     { key: 'nodeVersion', value: () => platformInfo.value ? `Node.js ${platformInfo.value.nodeVersion}` : '-', i18n: 'about.nodeVersion' }
 ];
+
+async function openHomepage() {
+    try {
+        await window.api.misc.openUrl('https://github.com/canbox-io/canbox-manager');
+    } catch (e) {
+        // 忽略打开失败
+    }
+}
 </script>
 
 <template>
@@ -35,7 +44,7 @@ const infoItems = [
             <!-- 产品信息 -->
             <div class="about-hero">
                 <div class="hero-icon">
-                    <span class="hero-emoji">📦</span>
+                    <img :src="logoUrl" :alt="$t('app.name')" class="hero-logo" />
                 </div>
                 <h1 class="hero-name">{{ $t('app.name') }}</h1>
                 <p class="hero-version">v{{ $t('app.version') }}</p>
@@ -57,14 +66,14 @@ const infoItems = [
                     </div>
                     <div class="info-row">
                         <span class="info-label">{{ $t('about.author') }}</span>
-                        <span class="info-value">lizl6</span>
+                        <span class="info-value">rexlevin</span>
                     </div>
                 </div>
             </el-card>
 
             <!-- 链接 -->
             <div class="about-links">
-                <el-button @click="window.api.misc.openUrl('https://github.com/rexlevin/canbox-io')">
+                <el-button @click="openHomepage">
                     🔗 {{ $t('about.homepage') }}
                 </el-button>
             </div>
@@ -107,8 +116,17 @@ const infoItems = [
 }
 
 .hero-icon {
-    color: var(--el-color-primary);
+    display: flex;
+    justify-content: center;
+    align-items: center;
     margin-bottom: 16px;
+}
+
+.hero-logo {
+    width: 96px;
+    height: 96px;
+    border-radius: 20px;
+    object-fit: contain;
 }
 
 .hero-name {

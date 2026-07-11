@@ -4,7 +4,7 @@
     "description": "Canbox 管理器 APP — APP 注册管理、仓库管理、系统设置",
     "main": "main.js",
     "license": "Apache-2.0",
-    "author": "lizl6",
+    "author": "rexlevin",
     "scripts": {
         "dev": "vite --host 0.0.0.0 --port 5101",
         "build": "vite build",
