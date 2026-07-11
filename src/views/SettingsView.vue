@@ -172,24 +172,31 @@ async function handleReset() {
 
 <style scoped>
 .view-container {
-    padding: 24px;
     height: 100%;
-    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
 .view-header {
-    margin-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--el-border-color-light);
+    flex-shrink: 0;
 }
 
 .view-title {
-    font-size: 24px;
+    font-size: 20px;
     font-weight: 600;
     margin: 0;
     color: var(--el-text-color-primary);
 }
 
 .settings-sections {
-    max-width: 640px;
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
 }
 
 .settings-section {

@@ -64,7 +64,7 @@ const infoItems = [
 
             <!-- 链接 -->
             <div class="about-links">
-                <el-button @click="window.api.misc.openUrl('https://github.com/lizl6/canbox')">
+                <el-button @click="window.api.misc.openUrl('https://github.com/rexlevin/canbox-io')">
                     🔗 {{ $t('about.homepage') }}
                 </el-button>
             </div>
@@ -74,24 +74,31 @@ const infoItems = [
 
 <style scoped>
 .view-container {
-    padding: 24px;
     height: 100%;
-    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
 .view-header {
-    margin-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--el-border-color-light);
+    flex-shrink: 0;
 }
 
 .view-title {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 600;
     margin: 0;
     color: var(--el-text-color-primary);
 }
 
 .about-content {
-    max-width: 480px;
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
 }
 
 .about-hero {
