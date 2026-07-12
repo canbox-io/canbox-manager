@@ -14,6 +14,13 @@ const path = require('path');
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/0.1.0';
 const TIMEOUT = 15000;
 
+// GitHub 代理列表（仅用于加速 github.com 下载，每次下载前并发测速选最优）
+const GITHUB_MIRRORS = [
+    { name: 'ghproxy', url: 'https://ghproxy.com' },
+    { name: 'ghfast', url: 'https://ghfast.top' },
+    { name: 'ghgo', url: 'https://ghgo.xyz' }
+];
+
 /**
  * 规范化仓库 URL：去除末尾 .git 和多余斜杠
  */
@@ -302,15 +309,40 @@ async function probeRepo(repoUrl) {
 }
 
 /**
- * 流式下载文件（带进度回调）
- * @param {string} url 下载 URL
- * @param {string} destPath 保存路径
- * @param {(progress:number)=>void} [onProgress] 进度回调 0~100
+ * 测试单个代理对指定 URL 的连通性与延迟
+ * @param {{name:string,url:string}} mirror 代理
+ * @param {string} originalUrl 原始下载 URL
+ * @param {number} [timeout=5000] 超时
+ * @returns {Promise<{mirror, available:boolean, latency:number}>}
  */
-async function downloadFile(url, destPath, onProgress) {
-    const dir = path.dirname(destPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+async function testMirrorLatency(mirror, originalUrl, timeout = 5000) {
+    const start = Date.now();
+    try {
+        await axios.head(`${mirror.url}/${originalUrl}`, {
+            timeout,
+            maxRedirects: 5,
+            headers: { 'User-Agent': UA }
+        });
+        return { mirror, available: true, latency: Date.now() - start };
+    } catch (e) {
+        return { mirror, available: false, latency: Date.now() - start };
+    }
+}
 
+/**
+ * 并发测速所有 GitHub 代理，返回按延迟升序的可用代理列表
+ */
+async function probeMirrors(originalUrl, timeout = 5000) {
+    const results = await Promise.all(
+        GITHUB_MIRRORS.map(m => testMirrorLatency(m, originalUrl, timeout))
+    );
+    return results.filter(r => r.available).sort((a, b) => a.latency - b.latency);
+}
+
+/**
+ * 流式下载单条线路（带进度回调）
+ */
+async function streamDownload(url, destPath, onProgress) {
     const resp = await axios({
         method: 'get',
         url,
@@ -346,6 +378,57 @@ async function downloadFile(url, destPath, onProgress) {
         writer.on('error', (err) => reject(err));
         resp.data.pipe(writer);
     });
+}
+
+/**
+ * 下载文件（带进度回调）
+ *
+ * 线路策略（对开发者和用户透明）：
+ * - 仅对 github.com 下载链接启用代理加速
+ * - 每次下载前并发测速所有代理，按延迟升序逐一尝试
+ * - 全部代理不可用或均下载失败时，降级为直连
+ * - 非 GitHub 链接直接下载
+ *
+ * @param {string} url 下载 URL
+ * @param {string} destPath 保存路径
+ * @param {(progress:number)=>void} [onProgress] 进度回调 0~100
+ */
+async function downloadFile(url, destPath, onProgress) {
+    const dir = path.dirname(destPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const isGithub = /^https?:\/\/[^/]*github\.com\//i.test(url);
+
+    // 构建候选线路：可用代理（按延迟升序）+ 直连兜底
+    const candidates = [];
+    if (isGithub) {
+        console.log('[repo-probe] downloadFile: github url, probing mirrors: %s', url);
+        const mirrors = await probeMirrors(url);
+        for (const m of mirrors) {
+            candidates.push({ name: m.mirror.name, url: `${m.mirror.url}/${url}` });
+            console.log('[repo-probe] downloadFile: mirror available: %s (%dms)', m.mirror.name, m.latency);
+        }
+        if (mirrors.length === 0) {
+            console.log('[repo-probe] downloadFile: all mirrors unavailable, fallback to direct');
+        }
+    }
+    candidates.push({ name: 'direct', url });
+
+    let lastErr;
+    for (const candidate of candidates) {
+        try {
+            console.log('[repo-probe] downloadFile: trying %s: %s', candidate.name, candidate.url);
+            await streamDownload(candidate.url, destPath, onProgress);
+            console.log('[repo-probe] downloadFile: success via %s', candidate.name);
+            return destPath;
+        } catch (e) {
+            lastErr = e;
+            // 清理可能产生的不完整文件，避免下一次候选误判已存在
+            try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) { /* ignore */ }
+            console.log('[repo-probe] downloadFile: %s failed: %s', candidate.name, e.message);
+        }
+    }
+    throw lastErr;
 }
 
 module.exports = {
