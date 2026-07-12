@@ -312,10 +312,10 @@ async function probeRepo(repoUrl) {
  * 测试单个代理对指定 URL 的连通性与延迟
  * @param {{name:string,url:string}} mirror 代理
  * @param {string} originalUrl 原始下载 URL
- * @param {number} [timeout=5000] 超时
+ * @param {number} [timeout=3000] 超时
  * @returns {Promise<{mirror, available:boolean, latency:number}>}
  */
-async function testMirrorLatency(mirror, originalUrl, timeout = 5000) {
+async function testMirrorLatency(mirror, originalUrl, timeout = 3000) {
     const start = Date.now();
     try {
         await axios.head(`${mirror.url}/${originalUrl}`, {
@@ -331,12 +331,38 @@ async function testMirrorLatency(mirror, originalUrl, timeout = 5000) {
 
 /**
  * 并发测速所有 GitHub 代理，返回按延迟升序的可用代理列表
+ *
+ * 竞速策略：任一代理可用即返回，不等其他代理超时。
+ * 若全部代理在超时窗口内不可用，返回空列表（由调用方降级直连）。
+ * 最坏耗时 = timeout（默认 3 秒），最好耗时 = 最快代理的响应时间。
  */
-async function probeMirrors(originalUrl, timeout = 5000) {
-    const results = await Promise.all(
-        GITHUB_MIRRORS.map(m => testMirrorLatency(m, originalUrl, timeout))
-    );
-    return results.filter(r => r.available).sort((a, b) => a.latency - b.latency);
+async function probeMirrors(originalUrl, timeout = 3000) {
+    // 跟踪已返回的结果，确保 resolve 只触发一次
+    const results = [];
+    let resolved = false;
+
+    return new Promise((resolve) => {
+        // 兜底：超时窗口结束后，返回已收集的可用代理（可能为空）
+        const timer = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            resolve(results.filter(r => r.available).sort((a, b) => a.latency - b.latency));
+        }, timeout + 100);
+
+        GITHUB_MIRRORS.forEach(m => {
+            testMirrorLatency(m, originalUrl, timeout).then(r => {
+                if (resolved) return;
+                results.push(r);
+                // 任一代理可用，立即返回（竞速）
+                if (r.available) {
+                    resolved = true;
+                    clearTimeout(timer);
+                    // 返回当前已知的可用代理（通常只有这一个，后续的会被忽略）
+                    resolve(results.filter(x => x.available).sort((a, b) => a.latency - b.latency));
+                }
+            });
+        });
+    });
 }
 
 /**
