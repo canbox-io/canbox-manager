@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-latest
+    steps:
+      # checkout 为同级目录，满足 build-linux.sh 中 CORE_SRC="../canbox-core" 的路径假设
+      - name: Checkout canbox-manager
+        uses: actions/checkout@v4
+        with:
+          path: canbox-manager
+
+      - name: Checkout canbox-core
+        uses: actions/checkout@v4
+        with:
+          repository: canbox-io/canbox-core
+          path: canbox-core
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmmirror.com/
+
+      - name: Set Electron mirror
+        run: echo "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" >> $GITHUB_ENV
+
+      - name: Install canbox-core dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: canbox-core
+
+      - name: Install canbox-manager dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: canbox-manager
+
+      - name: Build Linux installer
+        run: npm run dist:linux
+        working-directory: canbox-manager
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: canbox-manager/release/*.sh
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
