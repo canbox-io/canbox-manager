@@ -57,7 +57,7 @@ echo   canbox-core: 已复制
 REM 2c. 复制 manager 文件
 set MANAGER_DIR=%STAGE_DIR%\canbox\manager
 mkdir "%MANAGER_DIR%"
-copy /y main.js preload.js repo-probe.js app-launcher.js package.json "%MANAGER_DIR%\" >nul
+copy /y main.js preload.js repo-probe.js app-launcher.js updater.js package.json "%MANAGER_DIR%\" >nul
 xcopy /e /i /q build "%MANAGER_DIR%\build" >nul
 xcopy /e /i /q icons "%MANAGER_DIR%\icons" >nul
 if exist logo.png copy /y logo.png "%MANAGER_DIR%\" >nul
