@@ -1,6 +1,12 @@
 #!/bin/bash
 # Canbox Linux 自解压安装脚本
-# 用法: ./Canbox-linux-x86_64.sh [安装路径] [--uninstall]
+# 用法: ./Canbox-linux-x86_64.sh [安装路径] [--update] [--uninstall [路径]]
+#
+# 模式:
+#   无参数 (tty)      交互式安装/更新，提示用户确认路径
+#   --update          非交互更新，自动探测已安装路径并更新
+#   [路径]            安装到指定路径
+#   --uninstall [路径] 卸载指定路径（默认 /opt/canbox）
 #
 # 默认安装到 /opt/canbox（需提权），也可指定用户目录。
 
@@ -26,119 +32,241 @@ if [ ! -d "$INSTALL_TMPDIR/canbox" ]; then
     exit 1
 fi
 
-# ====== 卸载模式 ======
-if [ "${1:-}" = "--uninstall" ]; then
-    INSTALL_DIR="${2:-/opt/canbox}"
-    echo "[canbox] 卸载: $INSTALL_DIR"
-    if [ ! -d "$INSTALL_DIR" ]; then
-        echo "[canbox] 目录不存在，无需卸载"
-        exit 0
+# ====== 公共函数 ======
+
+# 探测已安装路径，输出路径或空
+detectExistingInstall() {
+    # 1. 从 desktop 文件 Exec 行反解
+    local desktop_file="$HOME/.local/share/applications/canbox.desktop"
+    if [ -f "$desktop_file" ]; then
+        local exec_line=$(grep '^Exec=' "$desktop_file" | head -1)
+        # Exec="/path/to/bin/canbox" manager  或  Exec=/path/to/bin/canbox manager
+        local path=$(echo "$exec_line" | sed -E 's/^Exec="?([^"]+)"? .*/\1/')
+        # 取 bin/canbox 的上级上级目录
+        if [ -n "$path" ] && [ -f "$path" ]; then
+            local bin_dir=$(dirname "$path")
+            local install_dir=$(dirname "$bin_dir")
+            if [ -f "$install_dir/bin/canbox" ]; then
+                echo "$install_dir"
+                return 0
+            fi
+        fi
     fi
-    NEED_SUDO=0
-    if [ ! -w "$INSTALL_DIR" ] && [ ! -w "$(dirname "$INSTALL_DIR")" ]; then
-        NEED_SUDO=1
+
+    # 2. 常见路径探测
+    for candidate in /opt/canbox "$HOME/.local/canbox" "$HOME/canbox"; do
+        if [ -f "$candidate/bin/canbox" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    # 3. 未找到
+    echo ""
+    return 1
+}
+
+# 判断路径是否需要提权（目录不可写）
+needPrivilege() {
+    local target_dir="$1"
+    local parent_dir=$(dirname "$target_dir")
+    if [ ! -w "$parent_dir" ] 2>/dev/null; then
+        return 0
     fi
-    if [ "$NEED_SUDO" = "1" ]; then
-        echo "[canbox] 需要 sudo 权限删除 $INSTALL_DIR"
-        sudo rm -rf "$INSTALL_DIR"
+    return 1
+}
+
+# 提权执行命令：优先 pkexec（GUI），降级 sudo
+runPrivileged() {
+    if command -v pkexec >/dev/null 2>&1; then
+        pkexec "$@"
     else
-        rm -rf "$INSTALL_DIR"
+        sudo "$@"
     fi
-    # 删除 desktop 文件
-    rm -f "$HOME/.local/share/applications/canbox.desktop" 2>/dev/null || true
-    rm -f "$HOME/.local/share/applications/canbox-"*.desktop 2>/dev/null || true
-    echo "[canbox] 卸载完成"
-    exit 0
-fi
+}
 
-# ====== 安装模式 ======
-INSTALL_DIR="${1:-/opt/canbox}"
-
-# 关闭正在运行的 manager（避免文件占用）
-pkill -f "canbox-manager" 2>/dev/null || true
-sleep 1
-
-echo ""
-echo "============================================"
-echo "  Canbox 安装程序"
-echo "============================================"
-echo "  安装路径: $INSTALL_DIR"
-echo "============================================"
-echo ""
-
-# 检查目标路径是否需要提权
-NEED_SUDO=0
-if [ "$(dirname "$INSTALL_DIR")" = "/opt" ] || [ ! -w "$(dirname "$INSTALL_DIR")" ] 2>/dev/null; then
-    NEED_SUDO=1
-    if [ "$NEED_SUDO" = "1" ]; then
-        echo "[canbox] 安装到系统目录需要管理员权限（sudo）"
-        echo "[canbox] 原因: $INSTALL_DIR 不在用户可写目录内"
-        echo ""
+# 安装文件到目标目录（处理提权）
+installFiles() {
+    local target_dir="$1"
+    if needPrivilege "$target_dir"; then
+        echo "[canbox] 安装到系统目录需要管理员权限"
+        echo "[canbox] 路径: $target_dir"
+        runPrivileged mkdir -p "$target_dir"
+        runPrivileged cp -r "$INSTALL_TMPDIR/canbox/"* "$target_dir/"
+        runPrivileged chmod +x "$target_dir/bin/canbox"
+        runPrivileged chmod +x "$target_dir/electron/electron" 2>/dev/null || true
+    else
+        mkdir -p "$target_dir"
+        cp -r "$INSTALL_TMPDIR/canbox/"* "$target_dir/"
+        chmod +x "$target_dir/bin/canbox"
+        chmod +x "$target_dir/electron/electron" 2>/dev/null || true
     fi
-fi
+}
 
-# 创建目标目录
-if [ "$NEED_SUDO" = "1" ]; then
-    sudo mkdir -p "$INSTALL_DIR"
-    sudo cp -r "$INSTALL_TMPDIR/canbox/"* "$INSTALL_DIR/"
-    # bin/canbox 需要可执行权限
-    sudo chmod +x "$INSTALL_DIR/bin/canbox"
-    sudo chmod +x "$INSTALL_DIR/electron/electron" 2>/dev/null || true
-else
-    mkdir -p "$INSTALL_DIR"
-    cp -r "$INSTALL_TMPDIR/canbox/"* "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/bin/canbox"
-    chmod +x "$INSTALL_DIR/electron/electron" 2>/dev/null || true
-fi
+# 生成 desktop 快捷方式
+generateDesktopFile() {
+    local install_dir="$1"
+    local apps_dir="$HOME/.local/share/applications"
+    mkdir -p "$apps_dir"
 
-echo "[canbox] 文件已复制到 $INSTALL_DIR"
+    # 复制图标到用户可访问目录
+    local icon_dir="$HOME/.local/share/canbox/icons"
+    mkdir -p "$icon_dir"
+    local icon_path=""
+    for icon_src in "$install_dir/manager/icons/512.png" "$install_dir/manager/icons/256.png" "$install_dir/manager/logo.png"; do
+        if [ -f "$icon_src" ]; then
+            cp "$icon_src" "$icon_dir/canbox.png" 2>/dev/null || true
+            icon_path="$icon_dir/canbox.png"
+            break
+        fi
+    done
 
-# 生成 manager desktop 快捷方式
-APPS_DIR="$HOME/.local/share/applications"
-mkdir -p "$APPS_DIR"
-
-# 复制图标到用户可访问目录
-ICON_DIR="$HOME/.local/share/canbox/icons"
-mkdir -p "$ICON_DIR"
-ICON_PATH=""
-for ICON_SRC in "$INSTALL_DIR/manager/icons/512.png" "$INSTALL_DIR/manager/icons/256.png" "$INSTALL_DIR/manager/logo.png"; do
-    if [ -f "$ICON_SRC" ]; then
-        cp "$ICON_SRC" "$ICON_DIR/canbox.png" 2>/dev/null || true
-        ICON_PATH="$ICON_DIR/canbox.png"
-        break
-    fi
-done
-
-DESKTOP_FILE="$APPS_DIR/canbox.desktop"
-cat > "$DESKTOP_FILE" <<EOF
+    local desktop_file="$apps_dir/canbox.desktop"
+    cat > "$desktop_file" <<EOF
 [Desktop Entry]
 Name=Canbox
 Comment=Canbox 应用集合平台
-Exec="$INSTALL_DIR/bin/canbox" manager
-${ICON_PATH:+Icon=$ICON_PATH}
+Exec="$install_dir/bin/canbox" manager
+${icon_path:+Icon=$icon_path}
 Type=Application
 Categories=Utility;Development;
 Terminal=false
 StartupNotify=true
 StartupWMClass=canbox-manager
 EOF
-chmod +x "$DESKTOP_FILE"
+    chmod +x "$desktop_file"
+    echo "[canbox] 已创建桌面快捷方式: $desktop_file"
+}
 
-echo "[canbox] 已创建桌面快捷方式: $DESKTOP_FILE"
+# 关闭正在运行的 manager（避免文件占用）
+killRunningManager() {
+    pkill -f "canbox-manager" 2>/dev/null || true
+    sleep 1
+}
+
+# 启动 manager
+launchManager() {
+    local install_dir="$1"
+    if [ -x "$install_dir/bin/canbox" ]; then
+        nohup "$install_dir/bin/canbox" manager >/dev/null 2>&1 &
+        echo "[canbox] Canbox Manager 已启动"
+    else
+        echo "[canbox] 启动失败: $install_dir/bin/canbox 不存在或不可执行"
+    fi
+}
+
+# ====== 卸载模式 ======
+if [ "${1:-}" = "--uninstall" ]; then
+    INSTALL_DIR="${2:-/opt/canbox}"
+    # 如果未指定路径，探测已安装路径
+    if [ -z "${2:-}" ]; then
+        INSTALL_DIR=$(detectExistingInstall)
+        if [ -z "$INSTALL_DIR" ]; then
+            INSTALL_DIR="/opt/canbox"
+        fi
+    fi
+    echo "[canbox] 卸载: $INSTALL_DIR"
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "[canbox] 目录不存在，无需卸载"
+        exit 0
+    fi
+    if needPrivilege "$INSTALL_DIR"; then
+        echo "[canbox] 需要 sudo 权限删除 $INSTALL_DIR"
+        runPrivileged rm -rf "$INSTALL_DIR"
+    else
+        rm -rf "$INSTALL_DIR"
+    fi
+    rm -f "$HOME/.local/share/applications/canbox.desktop" 2>/dev/null || true
+    rm -f "$HOME/.local/share/applications/canbox-"*.desktop 2>/dev/null || true
+    echo "[canbox] 卸载完成"
+    exit 0
+fi
+
+# ====== 更新模式（非交互）======
+UPDATE_MODE=0
+if [ "${1:-}" = "--update" ]; then
+    UPDATE_MODE=1
+    shift
+fi
+
+# ====== 安装模式 ======
+# 关闭正在运行的 manager
+killRunningManager
+
+# 探测已安装路径
+EXISTING_DIR=$(detectExistingInstall)
+
+if [ "$UPDATE_MODE" = "1" ]; then
+    # 非交互更新模式：必须有已安装路径，否则报错
+    if [ -z "$EXISTING_DIR" ]; then
+        echo "[canbox] --update 模式: 未检测到已安装的 Canbox，无法自动更新" >&2
+        echo "[canbox] 请以交互模式运行安装程序进行首次安装" >&2
+        exit 1
+    fi
+    INSTALL_DIR="$EXISTING_DIR"
+    echo "[canbox] 更新模式: 检测到已安装路径 $INSTALL_DIR，开始更新"
+else
+    # 交互模式
+    if [ -n "$EXISTING_DIR" ]; then
+        # 已有安装：更新，告知路径
+        echo ""
+        echo "============================================"
+        echo "  检测到已安装的 Canbox"
+        echo "  安装路径: $EXISTING_DIR"
+        echo "  将更新到该目录"
+        echo "============================================"
+        echo ""
+        echo "按回车继续更新，或输入新路径覆盖安装: "
+        read -r user_input
+        if [ -n "$user_input" ]; then
+            INSTALL_DIR="$user_input"
+        else
+            INSTALL_DIR="$EXISTING_DIR"
+        fi
+    else
+        # 首次安装：提示默认路径或自定义
+        DEFAULT_DIR="/opt/canbox"
+        echo ""
+        echo "============================================"
+        echo "  Canbox 安装程序"
+        echo "============================================"
+        echo "  默认安装路径: $DEFAULT_DIR (需管理员权限)"
+        echo "  或输入其他路径（如 $HOME/.local/canbox 无需提权）"
+        echo "============================================"
+        echo ""
+        echo "请输入安装路径 (回车使用默认 $DEFAULT_DIR): "
+        read -r user_input
+        if [ -n "$user_input" ]; then
+            INSTALL_DIR="$user_input"
+        else
+            INSTALL_DIR="$DEFAULT_DIR"
+        fi
+    fi
+fi
+
+echo ""
+echo "============================================"
+echo "  Canbox 安装程序"
+echo "  安装路径: $INSTALL_DIR"
+echo "============================================"
+echo ""
+
+# 安装文件
+installFiles "$INSTALL_DIR"
+echo "[canbox] 文件已复制到 $INSTALL_DIR"
+
+# 生成 desktop 快捷方式
+generateDesktopFile "$INSTALL_DIR"
+
 echo ""
 echo "============================================"
 echo "  安装完成！"
 echo "============================================"
 echo ""
 
-# 启动 manager（后台运行）
-if [ -x "$INSTALL_DIR/bin/canbox" ]; then
-    nohup "$INSTALL_DIR/bin/canbox" manager >/dev/null 2>&1 &
-    echo "  Canbox Manager 已启动"
-else
-    echo "  从应用菜单中找到 'Canbox' 启动"
-    echo "  或手动启动: $INSTALL_DIR/bin/canbox manager"
-fi
+# 启动 manager
+launchManager "$INSTALL_DIR"
+
 echo ""
 echo "  卸载: $0 --uninstall $INSTALL_DIR"
 echo "============================================"

@@ -308,9 +308,10 @@ function runInstallerAndQuit(installerPath) {
         child = spawn(installerPath, [], { detached: true, stdio: 'ignore' });
     } else {
         // Linux: .sh 自解压脚本需设置可执行权限
-        console.log('[updater] runInstallerAndQuit: chmod +x and spawning bash installer');
+        // 传 --update 参数：非交互更新模式，自动探测已安装路径
+        console.log('[updater] runInstallerAndQuit: chmod +x and spawning bash installer with --update');
         fs.chmodSync(installerPath, 0o755);
-        child = spawn('bash', [installerPath], { detached: true, stdio: 'ignore' });
+        child = spawn('bash', [installerPath, '--update'], { detached: true, stdio: 'ignore' });
     }
     child.unref();
     console.log('[updater] runInstallerAndQuit: installer spawned, pid=%s, quitting manager', child.pid);
