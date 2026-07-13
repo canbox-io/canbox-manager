@@ -65,6 +65,7 @@ async function testMirrorLatency(mirror, originalUrl, timeout = 3000) {
  * 任一可用即返回，全部不可用则返回空列表（降级直连）
  */
 async function probeMirrors(originalUrl, timeout = 3000) {
+    console.log('[updater] probeMirrors: testing %d mirrors for %s', GITHUB_MIRRORS.length, originalUrl);
     const results = [];
     let resolved = false;
 
@@ -72,7 +73,9 @@ async function probeMirrors(originalUrl, timeout = 3000) {
         const timer = setTimeout(() => {
             if (resolved) return;
             resolved = true;
-            resolve(results.filter(r => r.available).sort((a, b) => a.latency - b.latency));
+            const available = results.filter(r => r.available).sort((a, b) => a.latency - b.latency);
+            console.log('[updater] probeMirrors: timeout reached, available=%d/%d', available.length, GITHUB_MIRRORS.length);
+            resolve(available);
         }, timeout + 100);
 
         GITHUB_MIRRORS.forEach(m => {
@@ -80,9 +83,12 @@ async function probeMirrors(originalUrl, timeout = 3000) {
                 if (resolved) return;
                 results.push(r);
                 if (r.available) {
+                    console.log('[updater] probeMirrors: mirror=%s available latency=%dms', r.mirror.name, r.latency);
                     resolved = true;
                     clearTimeout(timer);
-                    resolve(results.filter(x => x.available).sort((a, b) => a.latency - b.latency));
+                    const available = results.filter(x => x.available).sort((a, b) => a.latency - b.latency);
+                    console.log('[updater] probeMirrors: selected %d available mirrors', available.length);
+                    resolve(available);
                 }
             });
         });
@@ -111,20 +117,20 @@ function getPlatformAssetName() {
  *   { hasUpdate: false, error: string }
  */
 async function checkUpdate() {
+    console.log('[updater] checkUpdate: start, currentVersion=%s repo=%s', pkg.version, UPDATE_REPO);
     const apiUrl = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
     const assetName = getPlatformAssetName();
+    console.log('[updater] checkUpdate: platform=%s assetName=%s', process.platform, assetName);
 
-    // 构建候选线路：可用代理（按延迟升序）+ 直连兜底
-    const candidates = [];
-    const mirrors = await probeMirrors(apiUrl);
-    for (const m of mirrors) {
-        candidates.push({ name: m.mirror.name, url: `${m.mirror.url}/${apiUrl}` });
-    }
-    candidates.push({ name: 'direct', url: apiUrl });
+    // GitHub API 不走镜像代理（镜像站只代理 github.com 下载资源，不代理 api.github.com）
+    // 直接直连 API，失败则返回错误
+    const candidates = [{ name: 'direct', url: apiUrl }];
+    console.log('[updater] checkUpdate: %d candidate lines (api direct only)', candidates.length);
 
     let lastErr;
     for (const candidate of candidates) {
         try {
+            console.log('[updater] checkUpdate: trying line=%s', candidate.name);
             const resp = await axios.get(candidate.url, {
                 timeout: TIMEOUT,
                 headers: {
@@ -134,16 +140,24 @@ async function checkUpdate() {
             });
             const data = resp.data;
             if (!data || !data.tag_name) {
+                console.log('[updater] checkUpdate: line=%s response has no tag_name, skip', candidate.name);
                 continue;
             }
 
             const latestVersion = data.tag_name.replace(/^v/, '');
             const currentVersion = pkg.version;
             const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+            console.log('[updater] checkUpdate: line=%s latestVersion=%s currentVersion=%s hasUpdate=%s',
+                candidate.name, latestVersion, currentVersion, hasUpdate);
 
             // 查找当前平台的安装包资产
             const assets = data.assets || [];
             const asset = assets.find(a => a.name === assetName);
+            if (!asset) {
+                console.log('[updater] checkUpdate: asset not found, assetName=%s assets=%j', assetName, assets.map(a => a.name));
+            } else {
+                console.log('[updater] checkUpdate: asset found, downloadUrl=%s size=%d', asset.browser_download_url, asset.size);
+            }
 
             return {
                 hasUpdate,
@@ -154,10 +168,12 @@ async function checkUpdate() {
                 releaseUrl: data.html_url || ''
             };
         } catch (e) {
+            console.log('[updater] checkUpdate: line=%s failed: %s', candidate.name, e.message);
             lastErr = e;
         }
     }
 
+    console.error('[updater] checkUpdate: all candidates failed, error=%s', lastErr ? lastErr.message : 'unknown');
     return { hasUpdate: false, error: lastErr ? lastErr.message : '检查更新失败' };
 }
 
@@ -165,6 +181,7 @@ async function checkUpdate() {
  * 流式下载（带进度回调）
  */
 async function streamDownload(url, destPath, onProgress) {
+    console.log('[updater] streamDownload: url=%s dest=%s', url, destPath);
     const resp = await axios({
         method: 'get',
         url,
@@ -179,6 +196,7 @@ async function streamDownload(url, destPath, onProgress) {
     }
 
     const total = parseInt(resp.headers['content-length'] || '0', 10);
+    console.log('[updater] streamDownload: status=200 total=%d bytes', total);
     let received = 0;
     const writer = fs.createWriteStream(destPath);
 
@@ -191,13 +209,20 @@ async function streamDownload(url, destPath, onProgress) {
         });
         resp.data.on('end', () => {
             writer.end();
-            writer.on('finish', () => resolve(destPath));
+            writer.on('finish', () => {
+                console.log('[updater] streamDownload: done, received=%d bytes', received);
+                resolve(destPath);
+            });
         });
         resp.data.on('error', (err) => {
+            console.error('[updater] streamDownload: stream error: %s', err.message);
             writer.destroy();
             reject(err);
         });
-        writer.on('error', (err) => reject(err));
+        writer.on('error', (err) => {
+            console.error('[updater] streamDownload: writer error: %s', err.message);
+            reject(err);
+        });
         resp.data.pipe(writer);
     });
 }
@@ -215,10 +240,14 @@ async function streamDownload(url, destPath, onProgress) {
 async function downloadInstaller(downloadUrl, onProgress) {
     const assetName = getPlatformAssetName();
     const destPath = path.join(os.tmpdir(), assetName);
+    console.log('[updater] downloadInstaller: start, url=%s dest=%s', downloadUrl, destPath);
 
     // 清理可能存在的旧文件
     try {
-        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+        if (fs.existsSync(destPath)) {
+            console.log('[updater] downloadInstaller: removing existing file %s', destPath);
+            fs.unlinkSync(destPath);
+        }
     } catch (e) { /* ignore */ }
 
     const isGithub = /^https?:\/\/[^/]*github\.com\//i.test(downloadUrl);
@@ -230,21 +259,30 @@ async function downloadInstaller(downloadUrl, onProgress) {
         for (const m of mirrors) {
             candidates.push({ name: m.mirror.name, url: `${m.mirror.url}/${downloadUrl}` });
         }
+    } else {
+        console.log('[updater] downloadInstaller: non-github url, skip mirror probing');
     }
     candidates.push({ name: 'direct', url: downloadUrl });
+    console.log('[updater] downloadInstaller: %d candidate lines', candidates.length);
 
     let lastErr;
-    for (const candidate of candidates) {
+    for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        console.log('[updater] downloadInstaller: trying line=%s (%d/%d)', candidate.name, i + 1, candidates.length);
         try {
             await streamDownload(candidate.url, destPath, onProgress);
+            const stat = fs.statSync(destPath);
+            console.log('[updater] downloadInstaller: success, line=%s size=%d bytes path=%s', candidate.name, stat.size, destPath);
             return destPath;
         } catch (e) {
+            console.error('[updater] downloadInstaller: line=%s failed: %s', candidate.name, e.message);
             lastErr = e;
             // 清理不完整文件
             try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) { /* ignore */ }
         }
     }
 
+    console.error('[updater] downloadInstaller: all candidates failed, error=%s', lastErr ? lastErr.message : 'unknown');
     throw lastErr;
 }
 
@@ -257,18 +295,25 @@ async function downloadInstaller(downloadUrl, onProgress) {
  * @param {string} installerPath 安装包本地路径
  */
 function runInstallerAndQuit(installerPath) {
+    console.log('[updater] runInstallerAndQuit: installerPath=%s platform=%s', installerPath, process.platform);
     if (!fs.existsSync(installerPath)) {
+        console.error('[updater] runInstallerAndQuit: installer not found: %s', installerPath);
         throw new Error('安装包不存在: ' + installerPath);
     }
 
+    let child;
     if (process.platform === 'win32') {
         // Windows: NSIS 安装包，启动时自动弹 UAC
-        spawn(installerPath, [], { detached: true, stdio: 'ignore' }).unref();
+        console.log('[updater] runInstallerAndQuit: spawning Windows installer (NSIS UAC)');
+        child = spawn(installerPath, [], { detached: true, stdio: 'ignore' });
     } else {
         // Linux: .sh 自解压脚本需设置可执行权限
+        console.log('[updater] runInstallerAndQuit: chmod +x and spawning bash installer');
         fs.chmodSync(installerPath, 0o755);
-        spawn('bash', [installerPath], { detached: true, stdio: 'ignore' }).unref();
+        child = spawn('bash', [installerPath], { detached: true, stdio: 'ignore' });
     }
+    child.unref();
+    console.log('[updater] runInstallerAndQuit: installer spawned, pid=%s, quitting manager', child.pid);
 
     // 退出 manager，让安装程序完成覆盖
     app.quit();
