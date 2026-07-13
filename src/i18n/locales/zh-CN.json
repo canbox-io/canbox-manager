@@ -83,7 +83,18 @@
         "author": "作者",
         "homepage": "项目主页",
         "checkUpdate": "检查更新",
-        "upToDate": "已是最新版本"
+        "upToDate": "已是最新版本",
+        "update": {
+            "title": "更新",
+            "currentVersion": "当前版本",
+            "latestVersion": "最新版本",
+            "newVersionAvailable": "发现新版本，建议立即更新",
+            "checkUpdate": "检查更新",
+            "updateNow": "立即更新",
+            "downloading": "下载中 ",
+            "downloadFailed": "下载失败",
+            "checkFailed": "检查更新失败"
+        }
     },
     "common": {
         "confirm": "确定",

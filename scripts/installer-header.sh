@@ -54,6 +54,10 @@ fi
 # ====== 安装模式 ======
 INSTALL_DIR="${1:-/opt/canbox}"
 
+# 关闭正在运行的 manager（避免文件占用）
+pkill -f "canbox-manager" 2>/dev/null || true
+sleep 1
+
 echo ""
 echo "============================================"
 echo "  Canbox 安装程序"
@@ -126,8 +130,15 @@ echo "============================================"
 echo "  安装完成！"
 echo "============================================"
 echo ""
-echo "  从应用菜单中找到 'Canbox' 启动"
-echo "  或手动启动: $INSTALL_DIR/bin/canbox manager"
+
+# 启动 manager（后台运行）
+if [ -x "$INSTALL_DIR/bin/canbox" ]; then
+    nohup "$INSTALL_DIR/bin/canbox" manager >/dev/null 2>&1 &
+    echo "  Canbox Manager 已启动"
+else
+    echo "  从应用菜单中找到 'Canbox' 启动"
+    echo "  或手动启动: $INSTALL_DIR/bin/canbox manager"
+fi
 echo ""
 echo "  卸载: $0 --uninstall $INSTALL_DIR"
 echo "============================================"

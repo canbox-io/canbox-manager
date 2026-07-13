@@ -38,6 +38,7 @@ const CORE_PATH = global.__CANBOX_CORE_PATH__;
 
 const repoProbe = require('./repo-probe');
 const appLauncher = require('./app-launcher');
+const updater = require('./updater');
 
 let mainWindow = null;
 
@@ -645,6 +646,38 @@ ipcMain.handle('manager.zoom.reset', async () => {
     return { success: true, factor: 1.0 };
 });
 
+// ====== 自动更新 ======
+
+ipcMain.handle('manager.update.check', async () => {
+    try {
+        return await updater.checkUpdate();
+    } catch (e) {
+        return { hasUpdate: false, error: e.message };
+    }
+});
+
+ipcMain.handle('manager.update.download', async (_e, downloadUrl) => {
+    try {
+        const installerPath = await updater.downloadInstaller(downloadUrl, (progress) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('manager.update.downloadProgress', { progress });
+            }
+        });
+        return { success: true, installerPath };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('manager.update.install', async (_e, installerPath) => {
+    try {
+        updater.runInstallerAndQuit(installerPath);
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
 // ====== 窗口创建 ======
 
 // 获取窗口状态 store（按 appId 物理隔离，黑盒式）
@@ -805,6 +838,14 @@ app.whenReady().then(() => {
     // 生产模式下生成 manager 自身 launcher（已存在则跳过）
     appLauncher.generateManagerLauncher();
     createWindow();
+    // 启动 10s 后后台检查更新（不阻塞启动）
+    setTimeout(() => {
+        updater.checkUpdate().then(result => {
+            if (result.hasUpdate && mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('manager.update.available', result);
+            }
+        }).catch(() => {});
+    }, 10000);
 });
 
 app.on('window-all-closed', () => {

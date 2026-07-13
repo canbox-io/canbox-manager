@@ -51,6 +51,10 @@ Section "Canbox" SecMain
     SectionIn RO
     SetOutPath "$INSTDIR"
 
+    ; 关闭正在运行的 manager（避免文件占用）
+    nsExec::ExecToLog 'taskkill /F /IM electron.exe /T'
+    Sleep 1000
+
     ; 写入文件（从 stage 目录复制）
     File /r "..\release\stage\canbox\*.*"
 
@@ -72,6 +76,9 @@ Section "Canbox" SecMain
 
     ; 桌面快捷方式
     CreateShortCut "$DESKTOP\Canbox.lnk" "$INSTDIR\bin\canbox.bat" "manager" "$INSTDIR\manager\icons\256.png" 0
+
+    ; 安装完成后启动 manager
+    Exec "$INSTDIR\bin\canbox.bat manager"
 SectionEnd
 
 ; ====== 卸载逻辑 ======

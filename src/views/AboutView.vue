@@ -1,12 +1,22 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import logoUrl from '../../logo.svg';
+import notification from '@/utils/notification';
 
 const { t } = useI18n();
 
 const platformInfo = ref(null);
 const coreVersion = ref('');
+
+// 更新相关
+const updateInfo = ref(null);
+const checking = ref(false);
+const downloading = ref(false);
+const downloadProgress = ref(0);
+
+let unsubUpdateAvailable = null;
+let unsubDownloadProgress = null;
 
 onMounted(async () => {
     try {
@@ -15,6 +25,21 @@ onMounted(async () => {
     } catch (e) {
         // 降级
     }
+
+    // 监听启动时后台检查的新版本通知
+    unsubUpdateAvailable = window.api.manager.onUpdateAvailable((data) => {
+        updateInfo.value = data;
+    });
+
+    // 监听下载进度
+    unsubDownloadProgress = window.api.manager.onUpdateDownloadProgress((data) => {
+        downloadProgress.value = data.progress;
+    });
+});
+
+onUnmounted(() => {
+    if (unsubUpdateAvailable) unsubUpdateAvailable();
+    if (unsubDownloadProgress) unsubDownloadProgress();
 });
 
 const infoItems = [
@@ -30,6 +55,45 @@ async function openHomepage() {
         await window.api.misc.openUrl('https://github.com/canbox-io/canbox-manager');
     } catch (e) {
         // 忽略打开失败
+    }
+}
+
+async function checkUpdate() {
+    checking.value = true;
+    try {
+        const result = await window.api.manager.updateCheck();
+        updateInfo.value = result;
+        if (!result.hasUpdate) {
+            if (result.error) {
+                notification.error(t('about.update.checkFailed'));
+            } else {
+                notification.success(t('about.update.upToDate'));
+            }
+        }
+    } catch (e) {
+        notification.error(t('about.update.checkFailed'));
+    } finally {
+        checking.value = false;
+    }
+}
+
+async function doUpdate() {
+    if (!updateInfo.value || !updateInfo.value.downloadUrl) return;
+    downloading.value = true;
+    downloadProgress.value = 0;
+    try {
+        const result = await window.api.manager.updateDownload(updateInfo.value.downloadUrl);
+        if (result.success) {
+            downloadProgress.value = 100;
+            // 启动安装包并退出 manager
+            await window.api.manager.updateInstall(result.installerPath);
+        } else {
+            downloading.value = false;
+            notification.error(result.error || t('about.update.downloadFailed'));
+        }
+    } catch (e) {
+        downloading.value = false;
+        notification.error(t('about.update.downloadFailed'));
     }
 }
 </script>
@@ -49,6 +113,49 @@ async function openHomepage() {
                 <h1 class="hero-name">{{ $t('app.name') }}</h1>
                 <p class="hero-version">v{{ $t('app.version') }}</p>
             </div>
+
+            <!-- 更新检查 -->
+            <el-card class="info-card update-card" shadow="never">
+                <template #header>
+                    <span class="section-title">{{ $t('about.update.title') }}</span>
+                </template>
+                <div class="update-section">
+                    <div class="update-info">
+                        <div class="info-row">
+                            <span class="info-label">{{ $t('about.update.currentVersion') }}</span>
+                            <span class="info-value">v{{ $t('app.version') }}</span>
+                        </div>
+                        <div v-if="updateInfo && updateInfo.latestVersion" class="info-row">
+                            <span class="info-label">{{ $t('about.update.latestVersion') }}</span>
+                            <span class="info-value" :class="{ 'new-version': updateInfo.hasUpdate }">
+                                v{{ updateInfo.latestVersion }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="update-actions">
+                        <el-button :loading="checking" @click="checkUpdate">
+                            {{ $t('about.update.checkUpdate') }}
+                        </el-button>
+                        <el-button
+                            v-if="updateInfo && updateInfo.hasUpdate && !downloading"
+                            type="primary"
+                            @click="doUpdate"
+                        >
+                            {{ $t('about.update.updateNow') }}
+                        </el-button>
+                    </div>
+
+                    <div v-if="updateInfo && updateInfo.hasUpdate" class="update-notice">
+                        {{ $t('about.update.newVersionAvailable') }}
+                    </div>
+
+                    <div v-if="downloading" class="download-progress">
+                        <el-progress :percentage="downloadProgress" :stroke-width="8" />
+                        <p class="progress-text">{{ $t('about.update.downloading') }}{{ downloadProgress }}%</p>
+                    </div>
+                </div>
+            </el-card>
 
             <!-- 技术信息 -->
             <el-card class="info-card" shadow="never">
@@ -182,5 +289,43 @@ async function openHomepage() {
 .about-links {
     display: flex;
     gap: 12px;
+}
+
+.update-card {
+    margin-bottom: 20px;
+}
+
+.update-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.update-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.update-notice {
+    font-size: 13px;
+    color: var(--el-color-success);
+    padding: 8px 12px;
+    background: var(--el-color-success-light-9);
+    border-radius: 4px;
+}
+
+.new-version {
+    color: var(--el-color-success);
+    font-weight: 600;
+}
+
+.download-progress {
+    margin-top: 4px;
+}
+
+.progress-text {
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
+    margin: 8px 0 0;
 }
 </style>

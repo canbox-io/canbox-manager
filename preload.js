@@ -99,6 +99,21 @@ const api = {
             ipcRenderer.on('manager:zoomChanged', (_e, factor) => callback(factor));
         },
 
+        // 自动更新
+        updateCheck: () => ipcRenderer.invoke('manager.update.check'),
+        updateDownload: (downloadUrl) => ipcRenderer.invoke('manager.update.download', downloadUrl),
+        updateInstall: (installerPath) => ipcRenderer.invoke('manager.update.install', installerPath),
+        onUpdateAvailable: (callback) => {
+            const handler = (_e, data) => callback(data);
+            ipcRenderer.on('manager.update.available', handler);
+            return () => ipcRenderer.removeListener('manager.update.available', handler);
+        },
+        onUpdateDownloadProgress: (callback) => {
+            const handler = (_e, data) => callback(data);
+            ipcRenderer.on('manager.update.downloadProgress', handler);
+            return () => ipcRenderer.removeListener('manager.update.downloadProgress', handler);
+        },
+
         // 事件监听
         appReady: () => ipcRenderer.invoke('manager.appReady')
     }

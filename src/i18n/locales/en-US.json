@@ -88,7 +88,18 @@
         "author": "Author",
         "homepage": "Homepage",
         "checkUpdate": "Check for Updates",
-        "upToDate": "Up to date"
+        "upToDate": "Up to date",
+        "update": {
+            "title": "Update",
+            "currentVersion": "Current Version",
+            "latestVersion": "Latest Version",
+            "newVersionAvailable": "New version available, update recommended",
+            "checkUpdate": "Check for Updates",
+            "updateNow": "Update Now",
+            "downloading": "Downloading ",
+            "downloadFailed": "Download failed",
+            "checkFailed": "Update check failed"
+        }
     },
     "common": {
         "confirm": "OK",
