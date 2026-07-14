@@ -52,7 +52,7 @@ const infoItems = [
 
 async function openHomepage() {
     try {
-        await window.api.misc.openUrl('https://github.com/canbox-io/canbox-manager');
+        await window.api.manager.openUrl('https://github.com/canbox-io/canbox-manager');
     } catch (e) {
         // 忽略打开失败
     }

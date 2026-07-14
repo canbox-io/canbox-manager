@@ -32,7 +32,7 @@ onMounted(() => {
 
 async function handleImport() {
     try {
-        const result = await window.api.dialog.showOpenDialog({
+        const result = await window.api.manager.showOpenDialog({
             properties: ['openFile'],
             filters: [
                 { name: 'Canbox APP 压缩包', extensions: ['zip'] }

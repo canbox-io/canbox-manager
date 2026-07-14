@@ -678,6 +678,14 @@ ipcMain.handle('manager.update.install', async (_e, installerPath) => {
     }
 });
 
+ipcMain.handle('manager.dialog.showOpenDialog', async (_e, options) => {
+    return dialog.showOpenDialog(BrowserWindow.getFocusedWindow(), options);
+});
+
+ipcMain.handle('manager.shell.openUrl', async (_e, url) => {
+    return shell.openExternal(url);
+});
+
 // ====== 窗口创建 ======
 
 // 获取窗口状态 store（按 appId 物理隔离，黑盒式）
