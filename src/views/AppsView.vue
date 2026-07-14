@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
@@ -13,6 +13,17 @@ const appsStore = useAppsStore();
 const reposStore = useReposStore();
 const importing = ref(false);
 const installingDeveloper = ref(false);
+
+// canbox-developer 的标识（package.json 的 id / name）
+const DEVELOPER_APP_ID = 'com.github.canbox-io.canbox-developer';
+const DEVELOPER_APP_NAME = 'canbox-developer';
+
+// 是否已安装 developer（已安装则不显示引导 banner）
+const hasDeveloperInstalled = computed(() => {
+    return appsStore.apps.some(app =>
+        app.id === DEVELOPER_APP_ID || app.name === DEVELOPER_APP_NAME
+    );
+});
 
 // 平台 SVG 图标（与 canbox-developer 保持一致）
 const PLATFORM_ICONS_SVG = {
@@ -233,8 +244,8 @@ async function installDeveloper() {
             </div>
         </div>
 
-        <!-- 开发者工具引导 banner（常驻底部） -->
-        <div class="developer-banner">
+        <!-- 开发者工具引导 banner（已安装 developer 则隐藏） -->
+        <div v-if="!hasDeveloperInstalled" class="developer-banner">
             <div class="banner-icon">🛠️</div>
             <div class="banner-text">
                 <div class="banner-title">{{ $t('developer.bannerTitle') }}</div>
