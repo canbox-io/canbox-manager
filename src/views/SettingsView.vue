@@ -17,6 +17,13 @@ const languages = [
 
 onMounted(async () => {
     await settingsStore.fetchSettings();
+    // 同步持久化的语言到 i18n（修复重启后 store 与 i18n 不一致）
+    const savedLang = settingsStore.settings.language;
+    if (savedLang && savedLang !== locale.value) {
+        locale.value = savedLang;
+    }
+    // 同步写 localStorage 缓存（保证 main.js 启动时读到的 cache 与 source 一致）
+    try { localStorage.setItem('canbox.locale', savedLang); } catch (e) {}
     const result = await window.api.manager.zoomGet();
     if (result.success) zoomFactor.value = result.factor;
 });
@@ -24,6 +31,7 @@ onMounted(async () => {
 async function handleLanguageChange(value) {
     await settingsStore.setSetting('language', value);
     locale.value = value;
+    try { localStorage.setItem('canbox.locale', value); } catch (e) {}
 }
 
 async function handleToggle(key) {
@@ -63,6 +71,7 @@ async function handleReset() {
             await settingsStore.setSetting(key, value);
         }
         locale.value = 'zh-CN';
+        try { localStorage.setItem('canbox.locale', 'zh-CN'); } catch (e) {}
         await handleZoomReset();
         notification.success('Settings reset to defaults');
     } catch (e) {

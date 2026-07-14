@@ -41,6 +41,17 @@ const _tRouter = performance.now();
 app.use(i18n);
 const _tI18n = performance.now();
 
+// 应用持久化的 locale（避免重启后回退到默认中文）
+// electron-store 无同步 API，用 localStorage 做同步缓存
+try {
+    const cachedLocale = localStorage.getItem('canbox.locale');
+    if (cachedLocale === 'zh-CN' || cachedLocale === 'en-US') {
+        i18n.global.locale.value = cachedLocale;
+    }
+} catch (e) {
+    console.warn('[i18n] Failed to read cached locale:', e);
+}
+
 // 注册 Element Plus 组件
 app.component('ElContainer', ElContainer);
 app.component('ElAside', ElAside);
