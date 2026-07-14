@@ -1,13 +1,18 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
 import { useAppsStore } from '@/stores/apps';
+import { useReposStore } from '@/stores/repos';
 import notification from '@/utils/notification';
 
 const { t } = useI18n();
+const router = useRouter();
 const appsStore = useAppsStore();
+const reposStore = useReposStore();
 const importing = ref(false);
+const installingDeveloper = ref(false);
 
 // 平台 SVG 图标（与 canbox-developer 保持一致）
 const PLATFORM_ICONS_SVG = {
@@ -104,6 +109,58 @@ async function handleClearData(app) {
     }
 }
 
+// 开发者工具引导 banner 跳转 URL（canbox-pages 网站开发者工具板块）
+const DEVELOPER_URL = 'https://canbox-io.github.io/canbox-pages/#developer';
+// canbox-developer 仓库 URL（用于一键添加仓库并安装）
+const DEVELOPER_REPO_URL = 'https://github.com/canbox-io/canbox-developer';
+
+async function openDeveloperTools() {
+    try {
+        await window.api.manager.openUrl(DEVELOPER_URL);
+    } catch (e) {
+        notification.error(e.message || t('common.error'));
+    }
+}
+
+// 一键安装 Developer：add repo → install → 跳转仓库页
+async function installDeveloper() {
+    if (installingDeveloper.value) return;
+    installingDeveloper.value = true;
+
+    let repoId = null;
+    try {
+        // 1. 添加 developer 仓库（已存在则复用）
+        await reposStore.fetchRepos();
+        const existing = reposStore.repos.find(r => r.url === DEVELOPER_REPO_URL);
+        if (existing) {
+            repoId = existing.id;
+            notification.info(t('developer.repoExists'));
+        } else {
+            const addResult = await reposStore.addRepo(DEVELOPER_REPO_URL);
+            if (!addResult.success) {
+                notification.error(addResult.error || t('developer.addFailed'));
+                return;
+            }
+            repoId = addResult.repo.id;
+        }
+
+        // 2. 跳转仓库页（让用户看到下载进度卡片）
+        router.push('/repos');
+
+        // 3. 触发安装（下载 + import）
+        const installResult = await reposStore.installRepo(repoId);
+        if (installResult.success) {
+            notification.success(t('developer.installSuccess'));
+        } else {
+            notification.error(installResult.error || t('developer.installFailed'));
+        }
+    } catch (e) {
+        notification.error(e.message || t('developer.installFailed'));
+    } finally {
+        installingDeveloper.value = false;
+    }
+}
+
 </script>
 
 <template>
@@ -173,6 +230,30 @@ async function handleClearData(app) {
                         </el-tooltip>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- 开发者工具引导 banner（常驻底部） -->
+        <div class="developer-banner">
+            <div class="banner-icon">🛠️</div>
+            <div class="banner-text">
+                <div class="banner-title">{{ $t('developer.bannerTitle') }}</div>
+                <div class="banner-desc">{{ $t('developer.bannerDesc') }}</div>
+            </div>
+            <div class="banner-actions">
+                <button
+                    class="banner-btn banner-btn-primary"
+                    :disabled="installingDeveloper"
+                    @click="installDeveloper"
+                >
+                    <span v-if="installingDeveloper" class="banner-spinner"></span>
+                    <span v-else>⬇️</span>
+                    {{ installingDeveloper ? $t('developer.installing') : $t('developer.bannerInstall') }}
+                </button>
+                <button class="banner-btn banner-btn-secondary" @click="openDeveloperTools">
+                    {{ $t('developer.bannerCta') }}
+                    <span class="banner-arrow">→</span>
+                </button>
             </div>
         </div>
     </div>
@@ -376,4 +457,120 @@ async function handleClearData(app) {
 .run-btn:hover { background: var(--el-color-success-light-9); }
 .clear-btn:hover { background: var(--el-color-warning-light-9); }
 .delete-btn:hover { background: var(--el-color-danger-light-9); }
+
+/* 开发者工具引导 banner */
+.developer-banner {
+    flex-shrink: 0;
+    margin: 0 24px 16px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3));
+    color: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.banner-icon {
+    font-size: 28px;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.banner-text {
+    flex: 1;
+    min-width: 0;
+}
+.banner-title {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.banner-desc {
+    font-size: 13px;
+    opacity: 0.9;
+    margin-top: 2px;
+    line-height: 1.4;
+}
+
+.banner-actions {
+    flex-shrink: 0;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.banner-btn {
+    font-size: 14px;
+    font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: background 0.2s, transform 0.1s;
+    font-family: inherit;
+}
+.banner-btn:active {
+    transform: translateY(1px);
+}
+.banner-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.banner-btn-primary {
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--el-color-primary);
+}
+.banner-btn-primary:hover:not(:disabled) {
+    background: #fff;
+}
+
+.banner-btn-secondary {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+.banner-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.banner-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: banner-spin 0.8s linear infinite;
+    display: inline-block;
+}
+@keyframes banner-spin {
+    to { transform: rotate(360deg); }
+}
+
+.banner-arrow {
+    transition: transform 0.2s;
+}
+.banner-btn-secondary:hover .banner-arrow {
+    transform: translateX(3px);
+}
+
+@media (max-width: 600px) {
+    .developer-banner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .banner-actions {
+        width: 100%;
+    }
+    .banner-btn {
+        flex: 1;
+        justify-content: center;
+    }
+}
 </style>

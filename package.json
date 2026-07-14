@@ -1,6 +1,6 @@
 {
     "name": "canbox-manager",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Canbox 管理器 APP — APP 注册管理、仓库管理、系统设置",
     "main": "main.js",
     "license": "Apache-2.0",

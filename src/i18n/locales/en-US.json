@@ -28,6 +28,17 @@
         "actions": "Actions",
         "noDesc": "No description"
     },
+    "developer": {
+        "bannerTitle": "Want to build your own APP?",
+        "bannerDesc": "Use Canbox Developer to debug, package and publish your apps",
+        "bannerCta": "Explore Developer Tools",
+        "bannerInstall": "Install Developer",
+        "installing": "Installing Developer...",
+        "installSuccess": "Developer installed",
+        "installFailed": "Installation failed",
+        "repoExists": "Developer repo already exists, installing...",
+        "addFailed": "Failed to add repo"
+    },
     "repos": {
         "title": "App Repos",
         "empty": "No repos added yet",
@@ -107,6 +118,7 @@
         "close": "Close",
         "save": "Save",
         "delete": "Delete",
-        "loading": "Loading..."
+        "loading": "Loading...",
+        "error": "Operation failed"
     }
 }

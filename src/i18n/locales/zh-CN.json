@@ -28,6 +28,17 @@
         "actions": "操作",
         "noDesc": "暂无描述"
     },
+    "developer": {
+        "bannerTitle": "想开发自己的 APP？",
+        "bannerDesc": "使用 Canbox Developer 调试、打包和发布你的应用",
+        "bannerCta": "了解开发者工具",
+        "bannerInstall": "一键安装 Developer",
+        "installing": "正在安装 Developer...",
+        "installSuccess": "Developer 已安装",
+        "installFailed": "安装失败",
+        "repoExists": "开发者仓库已存在，正在安装...",
+        "addFailed": "添加仓库失败"
+    },
     "repos": {
         "title": "应用仓库",
         "empty": "还没有添加任何仓库",
@@ -102,6 +113,7 @@
         "close": "关闭",
         "save": "保存",
         "delete": "删除",
-        "loading": "加载中..."
+        "loading": "加载中...",
+        "error": "操作失败"
     }
 }
