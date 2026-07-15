@@ -24,6 +24,10 @@
         "clearData": "Clear Data",
         "clearDataConfirm": "Are you sure you want to clear this app's data?",
         "clearDataSuccess": "Data cleared",
+        "repairLauncher": "Repair Shortcut",
+        "repairLauncherSuccess": "Shortcut regenerated",
+        "repairLauncherSkipped": "Development mode, no shortcut needed",
+        "repairLauncherFailed": "Repair failed: {error}",
         "actions": "Actions",
         "noDesc": "No description"
     },

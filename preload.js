@@ -48,6 +48,7 @@ const api = {
         appsRemove: (appId) => ipcRenderer.invoke('manager.apps.remove', appId),
         appsLaunch: (appId) => ipcRenderer.invoke('manager.apps.launch', appId),
         appsClearData: (appId) => ipcRenderer.invoke('manager.apps.clearData', appId),
+        appsRepairLauncher: (appId) => ipcRenderer.invoke('manager.apps.repairLauncher', appId),
 
         // 仓库管理
         reposList: () => ipcRenderer.invoke('manager.repos.list'),

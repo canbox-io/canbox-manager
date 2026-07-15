@@ -120,6 +120,24 @@ async function handleClearData(app) {
     }
 }
 
+// 修复快捷方式（强制重新生成 launcher）
+async function handleRepairLauncher(app) {
+    try {
+        const result = await window.api.manager.appsRepairLauncher(app.appId);
+        if (result.success) {
+            if (result.skipped) {
+                notification.info(t('apps.repairLauncherSkipped'));
+            } else {
+                notification.success(t('apps.repairLauncherSuccess'));
+            }
+        } else {
+            notification.error(t('apps.repairLauncherFailed', { error: result.error }));
+        }
+    } catch (e) {
+        notification.error(t('apps.repairLauncherFailed', { error: e.message || t('common.error') }));
+    }
+}
+
 // 开发者工具引导 banner 跳转 URL（canbox-pages 网站开发者工具板块）
 const DEVELOPER_URL = 'https://canbox-io.github.io/canbox-pages/#developer';
 // canbox-developer 仓库 URL（用于一键添加仓库并安装）
@@ -232,6 +250,9 @@ async function installDeveloper() {
                     <div class="app-actions">
                         <el-tooltip :content="$t('apps.launch')" placement="top">
                             <button class="icon-btn run-btn" @click="handleLaunch(app)">▶️</button>
+                        </el-tooltip>
+                        <el-tooltip :content="$t('apps.repairLauncher')" placement="top">
+                            <button class="icon-btn repair-btn" @click="handleRepairLauncher(app)">🔧</button>
                         </el-tooltip>
                         <el-tooltip :content="$t('apps.clearData')" placement="top">
                             <button class="icon-btn clear-btn" @click="handleClearData(app)">🧹</button>
@@ -466,6 +487,7 @@ async function installDeveloper() {
     transform: translateY(0);
 }
 .run-btn:hover { background: var(--el-color-success-light-9); }
+.repair-btn:hover { background: var(--el-color-primary-light-9); }
 .clear-btn:hover { background: var(--el-color-warning-light-9); }
 .delete-btn:hover { background: var(--el-color-danger-light-9); }
 

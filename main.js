@@ -343,6 +343,20 @@ ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
     }
 });
 
+// 修复 APP 快捷方式（强制重新生成 launcher）
+ipcMain.handle('manager.apps.repairLauncher', async (_e, appId) => {
+    const appInfo = readAppInfo(appId);
+    if (!appInfo) {
+        return { success: false, error: 'App not found or package.json invalid' };
+    }
+    const result = appLauncher.generateLauncher(appInfo, { force: true });
+    if (result.skipped) {
+        // 生产模式下才会真正生成，开发模式返回 skipped
+        return { success: true, skipped: true };
+    }
+    return result;
+});
+
 // -- 仓库管理 --
 // 仓库元数据存储在 manager 自己的 store 中（data/canbox-manager/store/repos.json）
 // 数据结构：{ repos: { [repoId]: { ...repoInfo } } }

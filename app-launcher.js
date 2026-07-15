@@ -2,8 +2,8 @@
  * canbox-manager — APP 启动器文件管理
  *
  * 在生产模式（CANBOX_ENV=production，由 bin/canbox 设置）下，为已安装的 APP 生成系统快捷方式：
- *   Linux:   ~/.local/share/applications/canbox-{name}.desktop
- *   Windows: %APPDATA%/Microsoft/Windows/Start Menu/Programs/canbox-{name}.lnk
+ *   Linux:   ~/.local/share/applications/canbox-{name}.desktop（文件名带前缀，菜单显示纯 name）
+ *   Windows: %APPDATA%/Microsoft/Windows/Start Menu/Programs/Canbox/{name}.lnk（Canbox 子文件夹分组）
  *
  * launcher 指向 bin/canbox（或 bin/canbox.bat），通过 `app <appId>` 参数启动对应 APP。
  * bin/canbox 内部执行: electron -r core/injection.js <app.asar> --app-id=<id> --no-sandbox
@@ -32,7 +32,7 @@ function getBinLauncherPath() {
 }
 
 /**
- * 获取 launcher 文件名（不含路径）
+ * 获取 launcher 文件名（不含路径，带 canbox- 前缀，用于文件系统标识）
  */
 function getLauncherName(appName) {
     return `canbox-${appName}`;
@@ -40,13 +40,17 @@ function getLauncherName(appName) {
 
 /**
  * 获取 launcher 文件路径
+ * Linux:   ~/.local/share/applications/canbox-{name}.desktop（文件名带前缀，Name= 用纯 name）
+ * Windows: %APPDATA%/Microsoft/Windows/Start Menu/Programs/Canbox/{name}.lnk（Canbox 子文件夹分组）
  */
 function getLauncherPath(appName) {
-    const launcherName = getLauncherName(appName);
     if (process.platform === 'win32') {
-        const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
-        return path.join(programsPath, `${launcherName}.lnk`);
+        // Windows: 放入 Canbox 子文件夹，文件名用纯 name，开始菜单显示为 "Canbox" 分组下的 "{name}"
+        const canboxGroupPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Canbox');
+        return path.join(canboxGroupPath, `${appName}.lnk`);
     } else {
+        // Linux: 文件名保留 canbox- 前缀便于辨识，.desktop 的 Name= 用纯 name
+        const launcherName = getLauncherName(appName);
         const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
         return path.join(applicationsPath, `${launcherName}.desktop`);
     }
@@ -76,19 +80,20 @@ function getIconPath(appId, logoDataUri) {
 /**
  * 生成 launcher 文件
  * @param {Object} appInfo { appId, name, description, logo }
- * @returns {Object} { success, error? }
+ * @param {Object} options { force?: boolean } force=true 时强制重新生成（用于修复）
+ * @returns {Object} { success, error?, skipped? }
  */
-function generateLauncher(appInfo) {
+function generateLauncher(appInfo, options) {
+    const opts = options || {};
     if (!shouldWriteLauncher()) {
         return { success: true, skipped: true };
     }
 
     const { appId, name, description, wmClass } = appInfo;
-    const launcherName = getLauncherName(name);
     const launcherPath = getLauncherPath(name);
 
-    // 已存在则跳过，避免重复生成
-    if (fs.existsSync(launcherPath)) {
+    // 已存在则跳过，避免重复生成（force 模式下不跳过）
+    if (!opts.force && fs.existsSync(launcherPath)) {
         return { success: true, skipped: true };
     }
 
@@ -100,18 +105,19 @@ function generateLauncher(appInfo) {
 
     try {
         if (process.platform === 'win32') {
-            const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
-            if (!fs.existsSync(programsPath)) fs.mkdirSync(programsPath, { recursive: true });
+            // Windows: 确保 Canbox 子文件夹存在
+            const canboxGroupPath = path.dirname(launcherPath);
+            if (!fs.existsSync(canboxGroupPath)) fs.mkdirSync(canboxGroupPath, { recursive: true });
             const escapedTarget = binPath.replace(/\\/g, '\\\\');
             const escapedIcon = iconPath ? iconPath.replace(/\\/g, '\\\\') : '';
             const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; $s.Arguments = '${args}'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
             execSync(cmd);
         } else {
-            // Linux: .desktop 文件
+            // Linux: .desktop 文件，文件名带 canbox- 前缀，Name= 用纯 name（菜单显示纯名字）
             const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
             if (!fs.existsSync(applicationsPath)) fs.mkdirSync(applicationsPath, { recursive: true });
             const desktopFile = `[Desktop Entry]
-Name=${launcherName}
+Name=${name}
 Comment=${description || ''}
 Exec="${binPath}" ${args}
 ${iconPath ? `Icon=${iconPath}` : ''}
