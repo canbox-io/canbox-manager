@@ -4,6 +4,30 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.1.3] - 2026-07-15
+
+### feat | 新功能 / Features
+
+新增 APP 更新检查功能，启动后自动检测已安装 APP 的新版本
+APP 卡片显示更新徽章和更新按钮，支持一键更新
+修正仓库更新判断逻辑，基于已安装版本对比而非仓库记录版本
+
+Add APP update checking, auto-detect new versions of installed apps on startup
+Show update badge and update button on app cards, support one-click update
+Fix repo update detection logic, compare against installed version instead of repo record
+
+### fix | 问题修复 / Bug Fixes
+
+修复启动时 ipcMain.invoke 调用导致的异常
+
+Fix startup crash caused by ipcMain.invoke call
+
+### chore | 维护 / Maintenance
+
+Release workflow 提取 CHANGELOG 内容作为 GitHub Release 说明
+
+Extract CHANGELOG content as GitHub Release notes in CI workflow
+
 ## [0.1.2] - 2026-07-15
 
 ### feat | 新功能 / Features
