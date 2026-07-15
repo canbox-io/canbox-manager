@@ -8,6 +8,7 @@ const { t } = useI18n();
 
 const platformInfo = ref(null);
 const coreVersion = ref('');
+const appVersion = __APP_VERSION__;
 
 // 更新相关
 const updateInfo = ref(null);
@@ -123,7 +124,7 @@ async function doUpdate() {
                     <div class="update-info">
                         <div class="info-row">
                             <span class="info-label">{{ $t('about.update.currentVersion') }}</span>
-                            <span class="info-value">v{{ $t('app.version') }}</span>
+                            <span class="info-value">v{{ appVersion }}</span>
                         </div>
                         <div v-if="updateInfo && updateInfo.latestVersion" class="info-row">
                             <span class="info-label">{{ $t('about.update.latestVersion') }}</span>
