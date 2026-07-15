@@ -45,10 +45,26 @@ jobs:
         run: npm run dist:linux
         working-directory: canbox-manager
 
+      - name: Extract changelog for this version
+        id: changelog
+        working-directory: canbox-manager
+        run: |
+          # tag 形如 v0.1.2，CHANGELOG.md 中是 ## [0.1.2]，去掉 v 前缀
+          VERSION="${GITHUB_REF_NAME#v}"
+          # 提取从 "## [版本号]" 到下一个 "## [" 之间的内容
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > changelog-extract.md
+          echo "Extracted changelog:"
+          cat changelog-extract.md
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: canbox-manager/release/*.sh
+          body_path: canbox-manager/changelog-extract.md
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
