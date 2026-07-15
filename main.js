@@ -584,6 +584,127 @@ ipcMain.handle('manager.settings.getAll', async () => {
     return settingsStore.store || {};
 });
 
+// -- 数据目录管理（读取/迁移 Users 目录，由 canbox-core env.js 读取 config.json 生效）--
+
+// config.json 直接读写（不依赖 electron-store，避免引入额外依赖）
+const CONFIG_FILE = path.join(env.userData, 'config.json');
+
+function readConfig() {
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+        }
+    } catch (e) {
+        console.error('[manager.data] readConfig failed: {}', e.message);
+    }
+    return {};
+}
+
+function writeConfig(config) {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 4), 'utf-8');
+}
+
+// 递归统计目录文件数（用于迁移前后校验）
+function countFiles(dir) {
+    if (!fs.existsSync(dir)) return 0;
+    let count = 0;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            count += countFiles(fullPath);
+        } else if (entry.isFile()) {
+            count++;
+        }
+    }
+    return count;
+}
+
+// 获取当前数据目录信息
+ipcMain.handle('manager.data.getPath', async () => {
+    const config = readConfig();
+    const customDataRoot = config.customDataRoot || null;
+    return {
+        userData: env.userData,
+        usersPath: env.usersPath,
+        customDataRoot: customDataRoot,
+        isDefault: !customDataRoot
+    };
+});
+
+// 迁移数据目录（targetPath 为 null 表示重置为默认 userData/Users）
+// 流程：校验 → 复制 Users/ → 验证 → 更新 config.json → 删除旧数据
+// 任一步骤失败 → 回滚（删新、留旧、不动 config.json）
+ipcMain.handle('manager.data.migrate', async (_e, targetPath) => {
+    const currentUsersPath = env.usersPath;
+    const newUsersBase = targetPath || env.userData;
+    const newUsersPath = path.join(newUsersBase, 'Users');
+
+    // 校验：目标与当前相同
+    if (path.resolve(currentUsersPath) === path.resolve(newUsersPath)) {
+        return { success: false, error: 'Target directory is the same as current' };
+    }
+
+    // 校验：目标目录若已存在且非空
+    if (fs.existsSync(newUsersPath)) {
+        const files = fs.readdirSync(newUsersPath);
+        if (files.length > 0) {
+            return { success: false, error: 'Target directory exists and is not empty' };
+        }
+    }
+
+    // 确保目标父目录存在
+    fs.mkdirSync(newUsersBase, { recursive: true });
+
+    // 复制前文件数（用于验证）
+    const sourceCount = countFiles(currentUsersPath);
+
+    // 复制 Users/ 到新位置
+    try {
+        fs.cpSync(currentUsersPath, newUsersPath, { recursive: true });
+    } catch (e) {
+        // 复制失败：清理已复制的部分，保持 config.json 不变
+        try { fs.rmSync(newUsersPath, { recursive: true, force: true }); } catch (_) {}
+        return { success: false, error: `Copy failed: ${e.message}` };
+    }
+
+    // 验证：文件数对比
+    const targetCount = countFiles(newUsersPath);
+    if (sourceCount !== targetCount) {
+        // 验证失败：清理新位置，保留旧数据
+        try { fs.rmSync(newUsersPath, { recursive: true, force: true }); } catch (_) {}
+        return {
+            success: false,
+            error: `Verification failed: source ${sourceCount} files, target ${targetCount} files`
+        };
+    }
+
+    // 验证通过：更新 config.json
+    const config = readConfig();
+    if (targetPath) {
+        config.customDataRoot = targetPath;
+    } else {
+        delete config.customDataRoot;
+    }
+    try {
+        writeConfig(config);
+    } catch (e) {
+        // 写 config.json 失败：回滚（删新位置）
+        try { fs.rmSync(newUsersPath, { recursive: true, force: true }); } catch (_) {}
+        return { success: false, error: `Failed to update config: ${e.message}` };
+    }
+
+    // config.json 已更新：删除旧位置 Users/ 目录
+    // 失败不影响功能（下次启动已指向新位置），仅记录日志
+    try {
+        fs.rmSync(currentUsersPath, { recursive: true, force: true });
+    } catch (e) {
+        console.error('[manager.data] Failed to cleanup old directory: {}', e.message);
+    }
+
+    return { success: true, newUsersPath };
+});
+
 // -- 文件任务 --
 const fileTasks = new Map();
 

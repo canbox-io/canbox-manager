@@ -10,6 +10,10 @@ const settingsStore = useSettingsStore();
 
 const zoomFactor = ref(1.0);
 
+// 数据目录
+const dataPath = ref(null);      // { usersPath, customDataRoot, isDefault, userData }
+const migrating = ref(false);
+
 const languages = [
     { value: 'zh-CN', label: '中文（简体）' },
     { value: 'en-US', label: 'English (US)' }
@@ -26,6 +30,12 @@ onMounted(async () => {
     try { localStorage.setItem('canbox.locale', savedLang); } catch (e) {}
     const result = await window.api.manager.zoomGet();
     if (result.success) zoomFactor.value = result.factor;
+    // 加载数据目录信息
+    try {
+        dataPath.value = await window.api.manager.dataGetPath();
+    } catch (e) {
+        console.error('[SettingsView] 加载数据目录失败:', e);
+    }
 });
 
 async function handleLanguageChange(value) {
@@ -76,6 +86,69 @@ async function handleReset() {
         notification.success('Settings reset to defaults');
     } catch (e) {
         // 用户取消
+    }
+}
+
+// 更改数据目录：选择新目录 → 确认 → 迁移
+async function handleChangeDataPath() {
+    if (!dataPath.value || migrating.value) return;
+    try {
+        const result = await window.api.manager.showOpenDialog({
+            properties: ['openDirectory', 'createDirectory'],
+            title: t('settings.dataPathMigrateTitle')
+        });
+        if (result.canceled || !result.filePaths.length) return;
+        const targetPath = result.filePaths[0];
+        const newUsersPath = targetPath + '/Users';
+
+        await ElMessageBox.confirm(
+            t('settings.dataPathMigrateConfirm', {
+                from: dataPath.value.usersPath,
+                to: newUsersPath
+            }),
+            t('settings.dataPathMigrateTitle'),
+            { type: 'warning' }
+        );
+
+        migrating.value = true;
+        const migrateResult = await window.api.manager.dataMigrate(targetPath);
+        if (migrateResult.success) {
+            notification.success(t('settings.dataPathMigrateSuccess'));
+            // 刷新显示
+            dataPath.value = await window.api.manager.dataGetPath();
+        } else {
+            notification.error(t('settings.dataPathMigrateFailed', { error: migrateResult.error }));
+        }
+    } catch (e) {
+        // 用户取消确认
+    } finally {
+        migrating.value = false;
+    }
+}
+
+// 恢复默认数据目录：迁移到 userData/Users
+async function handleResetDataPath() {
+    if (!dataPath.value || migrating.value || dataPath.value.isDefault) return;
+    try {
+        const defaultUsersPath = dataPath.value.userData + '/Users';
+        await ElMessageBox.confirm(
+            t('settings.dataPathResetConfirm', { to: defaultUsersPath }),
+            t('settings.dataPathMigrateTitle'),
+            { type: 'warning' }
+        );
+
+        migrating.value = true;
+        const result = await window.api.manager.dataMigrate(null);
+        if (result.success) {
+            notification.success(t('settings.dataPathMigrateSuccess'));
+            dataPath.value = await window.api.manager.dataGetPath();
+        } else {
+            notification.error(t('settings.dataPathMigrateFailed', { error: result.error }));
+        }
+    } catch (e) {
+        // 用户取消
+    } finally {
+        migrating.value = false;
     }
 }
 </script>
@@ -166,6 +239,40 @@ async function handleReset() {
                         :max="365"
                         size="default"
                     />
+                </div>
+
+                <!-- 数据目录 -->
+                <div class="setting-item setting-item-data-path">
+                    <div class="setting-label">
+                        <span class="label-text">
+                            {{ $t('settings.dataPath') }}
+                            <el-tag size="small" :type="dataPath?.isDefault ? 'info' : 'warning'" class="path-tag">
+                                {{ dataPath?.isDefault ? $t('settings.dataPathDefault') : $t('settings.dataPathCustom') }}
+                            </el-tag>
+                        </span>
+                        <span class="label-hint">
+                            {{ $t('settings.dataPathHint') }}
+                        </span>
+                        <span v-if="dataPath" class="label-path">{{ dataPath.usersPath }}</span>
+                    </div>
+                    <div class="data-path-actions">
+                        <el-button
+                            size="default"
+                            :loading="migrating"
+                            @click="handleChangeDataPath"
+                        >
+                            {{ $t('settings.dataPathChange') }}
+                        </el-button>
+                        <el-button
+                            v-if="dataPath && !dataPath.isDefault"
+                            size="default"
+                            plain
+                            :loading="migrating"
+                            @click="handleResetDataPath"
+                        >
+                            {{ $t('settings.dataPathReset') }}
+                        </el-button>
+                    </div>
                 </div>
             </el-card>
 
@@ -260,5 +367,28 @@ async function handleReset() {
     text-align: center;
     font-size: 15px;
     color: var(--el-text-color-primary);
+}
+
+.setting-item-data-path {
+    align-items: flex-start;
+}
+
+.path-tag {
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.label-path {
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    word-break: break-all;
+    margin-top: 2px;
+}
+
+.data-path-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
 }
 </style>

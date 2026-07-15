@@ -72,6 +72,10 @@ const api = {
         fileTaskCancel: (taskId) => ipcRenderer.invoke('manager.fileTask.cancel', taskId),
         fileTaskList: () => ipcRenderer.invoke('manager.fileTask.list'),
 
+        // 数据目录管理
+        dataGetPath: () => ipcRenderer.invoke('manager.data.getPath'),
+        dataMigrate: (targetPath) => ipcRenderer.invoke('manager.data.migrate', targetPath),
+
         // 缩放
         zoomGet: () => ipcRenderer.invoke('manager.zoom.get'),
         zoomSet: (factor) => ipcRenderer.invoke('manager.zoom.set', factor),
