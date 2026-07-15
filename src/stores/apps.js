@@ -40,6 +40,10 @@ export const useAppsStore = defineStore('apps', () => {
         return result;
     }
 
+    async function checkUpdates() {
+        return await window.api.manager.appsCheckUpdates();
+    }
+
     return {
         apps,
         loading,
@@ -47,6 +51,7 @@ export const useAppsStore = defineStore('apps', () => {
         importApp,
         removeApp,
         launchApp,
-        clearAppData
+        clearAppData,
+        checkUpdates
     };
 });

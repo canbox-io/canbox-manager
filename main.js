@@ -357,6 +357,47 @@ ipcMain.handle('manager.apps.repairLauncher', async (_e, appId) => {
     return result;
 });
 
+// 检查所有已安装 APP 的更新（同步所有已安装仓库，返回有更新的仓库列表）
+async function checkAllAppUpdates() {
+    const repos = getAllRepos();
+    const updates = [];
+    for (const repoId of Object.keys(repos)) {
+        const repo = repos[repoId];
+        if (!repo.installedAppId) continue;
+        try {
+            const probed = await repoProbe.probeRepo(repo.url);
+            const installedVersion = getInstalledVersion(repo.installedAppId);
+            const toUpdate = installedVersion && installedVersion !== probed.version;
+            repos[repoId] = {
+                ...repo,
+                version: probed.version,
+                installedVersion,
+                toUpdate,
+                lastError: null,
+                updatedAt: Date.now()
+            };
+            if (toUpdate) {
+                updates.push({
+                    repoId,
+                    appId: repo.installedAppId,
+                    name: repo.name,
+                    currentVersion: installedVersion,
+                    newVersion: probed.version
+                });
+            }
+        } catch (e) {
+            // 单个仓库 probe 失败不影响其他
+            console.error('[checkUpdates] probe failed for %s: %s', repoId, e.message);
+        }
+    }
+    saveAllRepos(repos);
+    return { success: true, updates };
+}
+
+ipcMain.handle('manager.apps.checkUpdates', async () => {
+    return checkAllAppUpdates();
+});
+
 // -- 仓库管理 --
 // 仓库元数据存储在 manager 自己的 store 中（data/canbox-manager/store/repos.json）
 // 数据结构：{ repos: { [repoId]: { ...repoInfo } } }
@@ -383,6 +424,23 @@ function checkInstalled(appIdentifier) {
     const idMap = mgrStore.get('idMap') || {};
     if (idMap[appIdentifier]) return idMap[appIdentifier];
     return null;
+}
+
+/**
+ * 读取已安装 APP 的版本号
+ * @param {string} installedAppId 安装后的 appId（目录名）
+ * @returns {string|null} 版本号，读取失败返回 null
+ */
+function getInstalledVersion(installedAppId) {
+    if (!installedAppId) return null;
+    const pkgPath = path.join(USERS_PATH, 'apps', installedAppId, 'package.json');
+    if (!fs.existsSync(pkgPath)) return null;
+    try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        return pkg.version || null;
+    } catch (e) {
+        return null;
+    }
 }
 
 ipcMain.handle('manager.repos.list', async () => {
@@ -456,8 +514,10 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
 
         const probed = await repoProbe.probeRepo(repo.url);
 
-        // 检查是否有新版本
-        const toUpdate = probed.version !== repo.version && repo.installedAppId;
+        // 检查是否有新版本：对比"已安装版本" vs "仓库最新版本"
+        const installedAppId = checkInstalled(probed.id);
+        const installedVersion = getInstalledVersion(installedAppId);
+        const toUpdate = installedAppId && installedVersion && installedVersion !== probed.version;
 
         repos[repoId] = {
             ...repo,
@@ -472,7 +532,8 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             platforms: probed.platforms,
             branch: probed.branch,
             readme: probed.readme,
-            installedAppId: checkInstalled(probed.id),
+            installedAppId,
+            installedVersion,
             toUpdate,
             lastError: null,
             updatedAt: Date.now()
@@ -549,6 +610,7 @@ ipcMain.handle('manager.repos.install', async (_e, repoId) => {
 
         // 更新仓库元数据
         repo.installedAppId = importResult.appId;
+        repo.installedVersion = getInstalledVersion(importResult.appId);
         repo.toUpdate = false;
         repo.updatedAt = Date.now();
         repos[repoId] = repo;
@@ -989,6 +1051,15 @@ app.whenReady().then(() => {
             }
         }).catch(() => {});
     }, 10000);
+
+    // 启动 30s 后后台检查 APP 更新（不阻塞启动）
+    setTimeout(() => {
+        checkAllAppUpdates().then(result => {
+            if (result.success && result.updates.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('manager.apps.updatesAvailable', result.updates);
+            }
+        }).catch(() => {});
+    }, 30000);
 });
 
 app.on('window-all-closed', () => {

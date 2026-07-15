@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
@@ -42,8 +42,41 @@ function getPlatforms(app) {
     return app.platforms && app.platforms.length > 0 ? app.platforms : ['windows', 'darwin', 'linux'];
 }
 
+// APP 更新信息：{ [appId]: { repoId, currentVersion, newVersion } }
+const appUpdates = ref({});
+let offUpdatesAvailable = null;
+
+async function refreshUpdates() {
+    try {
+        const result = await appsStore.checkUpdates();
+        if (result.success) {
+            const map = {};
+            for (const u of result.updates) {
+                map[u.appId] = u;
+            }
+            appUpdates.value = map;
+            await reposStore.fetchRepos();
+        }
+    } catch (e) {
+        // 静默失败
+    }
+}
+
 onMounted(() => {
     appsStore.fetchApps();
+    // 监听后台自动检查结果
+    offUpdatesAvailable = window.api.manager.onAppsUpdatesAvailable((updates) => {
+        const map = {};
+        for (const u of updates) {
+            map[u.appId] = u;
+        }
+        appUpdates.value = map;
+        reposStore.fetchRepos();
+    });
+});
+
+onUnmounted(() => {
+    if (offUpdatesAvailable) offUpdatesAvailable();
 });
 
 async function handleImport() {
@@ -138,6 +171,35 @@ async function handleRepairLauncher(app) {
     }
 }
 
+// 更新 APP（通过仓库重新下载安装）
+async function handleUpdateApp(app) {
+    const update = appUpdates.value[app.appId];
+    if (!update) return;
+    try {
+        await ElMessageBox.confirm(
+            t('apps.updateConfirm', {
+                name: app.name,
+                current: update.currentVersion,
+                newVersion: update.newVersion
+            }),
+            t('apps.update'),
+            { type: 'info' }
+        );
+        await reposStore.installRepo(update.repoId);
+        notification.success(t('apps.updateSuccess'));
+        // 更新完成后清除该 APP 的更新标记并刷新列表
+        const next = { ...appUpdates.value };
+        delete next[app.appId];
+        appUpdates.value = next;
+        await appsStore.fetchApps();
+    } catch (e) {
+        // 用户取消或安装失败
+        if (e && e.message) {
+            notification.error(e.message);
+        }
+    }
+}
+
 // 开发者工具引导 banner 跳转 URL（canbox-pages 网站开发者工具板块）
 const DEVELOPER_URL = 'https://canbox-io.github.io/canbox-pages/#developer';
 // canbox-developer 仓库 URL（用于一键添加仓库并安装）
@@ -226,6 +288,19 @@ async function installDeveloper() {
                     <div class="name-row">
                         <span class="app-name">{{ app.name }}</span>
                         <span class="app-version">v{{ app.version }}</span>
+                        <!-- 更新提醒徽章 -->
+                        <el-tooltip
+                            v-if="appUpdates[app.appId]"
+                            :content="$t('apps.updateAvailable', {
+                                current: appUpdates[app.appId].currentVersion,
+                                newVersion: appUpdates[app.appId].newVersion
+                            })"
+                            placement="top"
+                        >
+                            <span class="update-badge" @click="handleUpdateApp(app)">
+                                {{ $t('apps.hasUpdate') }} v{{ appUpdates[app.appId].newVersion }}
+                            </span>
+                        </el-tooltip>
                         <!-- 平台图标靠右，无 platforms 则默认全平台 -->
                         <span class="platforms">
                             <el-tooltip
@@ -250,6 +325,13 @@ async function installDeveloper() {
                     <div class="app-actions">
                         <el-tooltip :content="$t('apps.launch')" placement="top">
                             <button class="icon-btn run-btn" @click="handleLaunch(app)">▶️</button>
+                        </el-tooltip>
+                        <el-tooltip
+                            v-if="appUpdates[app.appId]"
+                            :content="$t('apps.update')"
+                            placement="top"
+                        >
+                            <button class="icon-btn update-btn" @click="handleUpdateApp(app)">🔄</button>
                         </el-tooltip>
                         <el-tooltip :content="$t('apps.repairLauncher')" placement="top">
                             <button class="icon-btn repair-btn" @click="handleRepairLauncher(app)">🔧</button>
@@ -340,6 +422,11 @@ async function installDeveloper() {
     to { transform: rotate(360deg); }
 }
 
+@keyframes update-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(230, 162, 60, 0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(230, 162, 60, 0); }
+}
+
 /* 卡片布局：logo 左侧 + 信息右侧 */
 .app-list {
     flex: 1;
@@ -406,6 +493,24 @@ async function installDeveloper() {
 .app-version {
     color: var(--el-text-color-regular);
     font-size: 15px;
+}
+
+/* 更新徽章 */
+.update-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: var(--el-color-warning-light-9);
+    color: var(--el-color-warning-dark-2);
+    border: 1px solid var(--el-color-warning-light-5);
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.update-badge:hover {
+    background: var(--el-color-warning-light-7);
 }
 .platforms {
     margin-left: auto;
@@ -487,6 +592,8 @@ async function installDeveloper() {
     transform: translateY(0);
 }
 .run-btn:hover { background: var(--el-color-success-light-9); }
+.update-btn { animation: update-pulse 2s ease-in-out infinite; }
+.update-btn:hover { background: var(--el-color-warning-light-9); }
 .repair-btn:hover { background: var(--el-color-primary-light-9); }
 .clear-btn:hover { background: var(--el-color-warning-light-9); }
 .delete-btn:hover { background: var(--el-color-danger-light-9); }

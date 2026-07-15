@@ -29,7 +29,12 @@
         "repairLauncherSkipped": "Development mode, no shortcut needed",
         "repairLauncherFailed": "Repair failed: {error}",
         "actions": "Actions",
-        "noDesc": "No description"
+        "noDesc": "No description",
+        "update": "Update",
+        "hasUpdate": "New version",
+        "updateAvailable": "Current v{current} → New v{newVersion}",
+        "updateConfirm": "New version available for {name} (v{current} → v{newVersion}), update now?",
+        "updateSuccess": "Update complete"
     },
     "developer": {
         "bannerTitle": "Want to build your own APP?",

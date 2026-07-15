@@ -49,6 +49,12 @@ const api = {
         appsLaunch: (appId) => ipcRenderer.invoke('manager.apps.launch', appId),
         appsClearData: (appId) => ipcRenderer.invoke('manager.apps.clearData', appId),
         appsRepairLauncher: (appId) => ipcRenderer.invoke('manager.apps.repairLauncher', appId),
+        appsCheckUpdates: () => ipcRenderer.invoke('manager.apps.checkUpdates'),
+        onAppsUpdatesAvailable: (callback) => {
+            const handler = (_e, updates) => callback(updates);
+            ipcRenderer.on('manager.apps.updatesAvailable', handler);
+            return () => ipcRenderer.removeListener('manager.apps.updatesAvailable', handler);
+        },
 
         // 仓库管理
         reposList: () => ipcRenderer.invoke('manager.repos.list'),
