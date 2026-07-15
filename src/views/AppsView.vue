@@ -185,6 +185,31 @@ async function handleUpdateApp(app) {
             t('apps.update'),
             { type: 'info' }
         );
+
+        // 检测 APP 是否正在运行
+        let { running } = await window.api.manager.appsIsRunning(app.appId);
+        if (running) {
+            try {
+                await ElMessageBox.confirm(
+                    t('apps.updateRunningPrompt', { name: app.name }),
+                    t('apps.update'),
+                    {
+                        type: 'warning',
+                        confirmButtonText: t('apps.closeAndUpdate'),
+                        cancelButtonText: t('common.cancel')
+                    }
+                );
+            } catch (cancelErr) {
+                // 用户取消
+                return;
+            }
+            const killRes = await window.api.manager.appsKillRunning(app.appId);
+            if (killRes.stillRunning) {
+                notification.error(t('apps.updateKillFailed'));
+                return;
+            }
+        }
+
         await reposStore.installRepo(update.repoId);
         notification.success(t('apps.updateSuccess'));
         // 更新完成后清除该 APP 的更新标记并刷新列表

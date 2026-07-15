@@ -34,7 +34,10 @@
         "hasUpdate": "New version",
         "updateAvailable": "Current v{current} → New v{newVersion}",
         "updateConfirm": "New version available for {name} (v{current} → v{newVersion}), update now?",
-        "updateSuccess": "Update complete"
+        "updateSuccess": "Update complete",
+        "updateRunningPrompt": "{name} is running and must be closed before updating. Close and continue?",
+        "closeAndUpdate": "Close and Update",
+        "updateKillFailed": "Failed to close APP, please close it manually and retry"
     },
     "developer": {
         "bannerTitle": "Want to build your own APP?",

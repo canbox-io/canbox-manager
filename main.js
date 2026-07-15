@@ -51,6 +51,48 @@ function generateAppId() {
     return customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 8)();
 }
 
+// ====== APP 进程追踪（内存映射 appId → pid）======
+// 启动 APP 时记录 pid，更新/删除前检测是否在运行
+const pidByAppId = new Map();
+
+/**
+ * 检测指定 appId 的 APP 是否正在运行
+ * @param {string} appId
+ * @returns {boolean}
+ */
+function isAppRunning(appId) {
+    const pid = pidByAppId.get(appId);
+    if (!pid) return false;
+    try {
+        // pid 0 会被当作向自己发信号；Node 中 pid<=0 会抛异常
+        // 发送信号 0 检测进程是否存在，不真正发信号
+        process.kill(pid, 0);
+        return true;
+    } catch (e) {
+        // ESRCH 表示进程已退出，清理映射
+        pidByAppId.delete(appId);
+        return false;
+    }
+}
+
+/**
+ * 关闭指定 appId 的 APP 进程
+ * @param {string} appId
+ * @returns {boolean} 是否成功发送关闭信号
+ */
+function killApp(appId) {
+    const pid = pidByAppId.get(appId);
+    if (!pid) return false;
+    try {
+        process.kill(pid, 'SIGTERM');
+        pidByAppId.delete(appId);
+        return true;
+    } catch (e) {
+        pidByAppId.delete(appId);
+        return false;
+    }
+}
+
 // 获取 manager 自己的 store（存 id → appId 映射等）
 function getManagerStore() {
     const store = require(path.join(CORE_PATH, 'lib', 'store'));
@@ -119,8 +161,13 @@ ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
 
 /**
  * 从 zip 导入 APP（提取为独立函数，供 apps.import 和 repos.install 共用）
+ *
+ * @param {string} zipPath zip 文件路径
+ * @param {object} [options]
+ * @param {string} [options.existingAppId] 覆盖式更新时指定已有 appId，
+ *                                        复用原目录，不生成新 appId，不新增 idMap 映射
  */
-async function importAppFromZip(zipPath) {
+async function importAppFromZip(zipPath, options) {
     const appsDir = path.join(USERS_PATH, 'apps');
     const os = require('os');
 
@@ -160,21 +207,30 @@ async function importAppFromZip(zipPath) {
             return { success: false, error: 'package.json must have "id" or "name" field' };
         }
 
-        // 生成随机 appId
-        const appId = generateAppId();
+        // 覆盖式更新：复用原 appId 和目录；新装：生成随机 appId
+        const isUpdate = !!(options && options.existingAppId);
+        const appId = isUpdate ? options.existingAppId : generateAppId();
         const destPath = path.join(appsDir, appId);
+
+        // 覆盖式更新：先清空旧目录（避免旧文件残留干扰新版本）
+        if (isUpdate && fs.existsSync(destPath)) {
+            const originalFs = require('original-fs');
+            originalFs.rmSync(destPath, { recursive: true, force: true });
+        }
 
         // 复制 APP 到 apps/{appId}/
         fs.mkdirSync(destPath, { recursive: true });
         copyDirSync(tempDir, destPath);
 
-        // 记录 id → appId 映射
-        const mgrStore = getManagerStore();
-        let idMap = mgrStore.get('idMap') || {};
-        idMap[appIdentifier] = appId;
-        mgrStore.set('idMap', idMap);
+        // 新装才记录 id → appId 映射；覆盖式更新时映射已存在，无需变更
+        if (!isUpdate) {
+            const mgrStore = getManagerStore();
+            let idMap = mgrStore.get('idMap') || {};
+            idMap[appIdentifier] = appId;
+            mgrStore.set('idMap', idMap);
+        }
 
-        return { success: true, appId, id: appIdentifier };
+        return { success: true, appId, id: appIdentifier, isUpdate };
     } catch (e) {
         return { success: false, error: e.message };
     } finally {
@@ -315,12 +371,35 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
         });
         child.unref();
 
+        // 追踪 pid，用于更新/删除前检测进程是否在运行
+        if (child.pid) {
+            pidByAppId.set(appId, child.pid);
+            child.on('exit', () => {
+                pidByAppId.delete(appId);
+            });
+        }
+
         console.log('[manager] 启动 APP:', appId, 'pid=', child.pid, 'electron=', process.execPath);
         return { success: true };
     } catch (e) {
         console.error('[manager] 启动 APP 异常:', appId, e.message);
         return { success: false, error: e.message };
     }
+});
+
+// 检测指定 appId 的 APP 是否正在运行
+ipcMain.handle('manager.apps.isRunning', async (_e, appId) => {
+    return { running: isAppRunning(appId) };
+});
+
+// 关闭正在运行的 APP 进程（用于更新前关闭）
+ipcMain.handle('manager.apps.killRunning', async (_e, appId) => {
+    const killed = killApp(appId);
+    if (killed) {
+        // 等待进程退出（SIGTERM 后进程不会立即消失，给 800ms 缓冲）
+        await new Promise(resolve => setTimeout(resolve, 800));
+    }
+    return { success: killed, stillRunning: isAppRunning(appId) };
 });
 
 ipcMain.handle('manager.apps.clearData', async (_e, appId) => {
@@ -600,7 +679,10 @@ ipcMain.handle('manager.repos.install', async (_e, repoId) => {
         });
 
         // 复用 importAppFromZip
-        const importResult = await importAppFromZip(zipPath);
+        // 更新场景：已有 installedAppId 时复用原 appId 目录（覆盖式更新），避免目录残留
+        const existingAppId = repo.installedAppId || checkInstalled(repo.appId || repo.name);
+        const importOptions = existingAppId ? { existingAppId } : {};
+        const importResult = await importAppFromZip(zipPath, importOptions);
         // 清理临时文件
         try { fs.unlinkSync(zipPath); } catch (e) {}
 

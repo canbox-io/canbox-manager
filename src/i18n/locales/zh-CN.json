@@ -34,7 +34,10 @@
         "hasUpdate": "有新版本",
         "updateAvailable": "当前 v{current} → 新版本 v{newVersion}",
         "updateConfirm": "检测到 {name} 新版本（v{current} → v{newVersion}），是否更新？",
-        "updateSuccess": "更新完成"
+        "updateSuccess": "更新完成",
+        "updateRunningPrompt": "{name} 正在运行，需先关闭才能更新。是否关闭并继续更新？",
+        "closeAndUpdate": "关闭并更新",
+        "updateKillFailed": "关闭 APP 失败，请手动关闭后重试"
     },
     "developer": {
         "bannerTitle": "想开发自己的 APP？",
