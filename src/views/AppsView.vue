@@ -12,7 +12,8 @@ const router = useRouter();
 const appsStore = useAppsStore();
 const reposStore = useReposStore();
 const importing = ref(false);
-const installingDeveloper = ref(false);
+// installingDeveloper 提升至 store，避免路由切换组件卸载后状态丢失
+const installingDeveloper = computed(() => reposStore.installingDeveloper);
 
 // canbox-developer 的标识（package.json 的 id / name）
 const DEVELOPER_APP_ID = 'com.github.canbox-io.canbox-developer';
@@ -240,8 +241,8 @@ async function openDeveloperTools() {
 
 // 一键安装 Developer：add repo → install → 跳转仓库页
 async function installDeveloper() {
-    if (installingDeveloper.value) return;
-    installingDeveloper.value = true;
+    if (reposStore.installingDeveloper) return;
+    reposStore.installingDeveloper = true;
 
     let repoId = null;
     try {
@@ -273,7 +274,7 @@ async function installDeveloper() {
     } catch (e) {
         notification.error(e.message || t('developer.installFailed'));
     } finally {
-        installingDeveloper.value = false;
+        reposStore.installingDeveloper = false;
     }
 }
 

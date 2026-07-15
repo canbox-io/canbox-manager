@@ -7,6 +7,8 @@ export const useReposStore = defineStore('repos', () => {
     const syncing = ref({});  // { [repoId]: boolean }
     const installing = ref({});  // { [repoId]: boolean }
     const installProgress = ref({});  // { [repoId]: number 0~100 }
+    // Developer 一键安装状态（全局，避免组件卸载后状态丢失）
+    const installingDeveloper = ref(false);
 
     async function fetchRepos() {
         loading.value = true;
@@ -70,6 +72,7 @@ export const useReposStore = defineStore('repos', () => {
         syncing,
         installing,
         installProgress,
+        installingDeveloper,
         fetchRepos,
         addRepo,
         removeRepo,
