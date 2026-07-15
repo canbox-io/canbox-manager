@@ -4,20 +4,18 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
-## [0.1.0] - 2026-07-13
+## [0.1.1] - 2026-07-15
 
 ### feat | 新功能 / Features
 
-首个正式版本发布，提供 APP 注册管理、仓库管理、系统设置等核心功能
-支持 APP 导入安装、启动、卸载及数据清理
-支持仓库探测与一键安装，集成 GitHub 镜像加速
-支持窗口状态持久化与多显示器
-支持 manager 自身自动更新
-配置 GitHub Actions 自动发布工作流
+在「我的 APP」页面添加开发者工具横幅及一键安装功能
+当 developer 应用已安装时自动隐藏开发者工具横幅
 
-First official release with core features: APP management, repository management, and system settings
-Support APP import, install, launch, uninstall, and data cleanup
-Support repository probing and one-click install with GitHub mirror acceleration
-Support window state persistence with multi-display
-Support manager self-update
-Configure GitHub Actions auto-release workflow
+Add developer tools banner and one-click install in 'My Apps' page
+Auto-hide developer tools banner when developer app is installed
+
+### fix | 问题修复 / Bug Fixes
+
+修复重启后语言设置回退为默认中文的问题
+
+Fix language settings reverting to default Chinese after restart
