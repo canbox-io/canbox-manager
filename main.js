@@ -538,6 +538,16 @@ ipcMain.handle('manager.repos.list', async () => {
 
 ipcMain.handle('manager.repos.add', async (_e, url) => {
     try {
+        // 去重检查：已存在的 URL 直接拒绝，避免发起无意义的 HTTP 请求
+        const existing = getAllRepos();
+        const normalizedUrl = (url || '').trim().replace(/\.git$/, '').replace(/\/$/, '');
+        const existed = Object.values(existing).find(r =>
+            (r.url || '').trim().replace(/\.git$/, '').replace(/\/$/, '') === normalizedUrl
+        );
+        if (existed) {
+            return { success: false, error: 'duplicate_url', repo: existed };
+        }
+
         // 探测仓库元数据
         const probed = await repoProbe.probeRepo(url);
 

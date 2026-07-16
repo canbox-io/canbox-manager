@@ -60,6 +60,7 @@
         "urlPlaceholder": "https://gitee.com/user/canbox-app",
         "addSuccess": "仓库添加成功",
         "addFailed": "仓库添加失败",
+        "addDuplicate": "该仓库地址已添加过",
         "remove": "删除",
         "removeConfirm": "确定要删除此仓库吗？",
         "removeSuccess": "仓库已删除",

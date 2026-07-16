@@ -62,6 +62,7 @@
         "namePlaceholder": "Optional, auto-detected if empty",
         "addSuccess": "Repository added",
         "addFailed": "Failed to add repository",
+        "addDuplicate": "This repository URL has already been added",
         "remove": "Remove",
         "removeConfirm": "Are you sure you want to remove this repository?",
         "removeSuccess": "Repository removed",

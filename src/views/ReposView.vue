@@ -67,6 +67,8 @@ async function handleAdd() {
             notification.success(t('repos.addSuccess'));
             showAddDialog.value = false;
             addForm.value = { url: '' };
+        } else if (result.error === 'duplicate_url') {
+            notification.warning(t('repos.addDuplicate'));
         } else {
             notification.error(result.error || t('repos.addFailed'));
         }
