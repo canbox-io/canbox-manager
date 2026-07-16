@@ -4,6 +4,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.1.4] - 2026-07-16
+
+### feat | 新功能 / Features
+
+添加仓库 URL 重复添加检查与提示，避免重复发起 HTTP 请求
+APP 更新前检查并关闭正在运行的实例，确保更新顺利
+
+Add duplicate repo URL check with prompt, avoid redundant HTTP requests
+Check and close running app instance before update
+
+### fix | 问题修复 / Bug Fixes
+
+修复 installingDeveloper 状态未持久化的问题
+
+Fix installingDeveloper state not persisted in store
+
 ## [0.1.3] - 2026-07-15
 
 ### feat | 新功能 / Features
