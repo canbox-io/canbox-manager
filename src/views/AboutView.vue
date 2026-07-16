@@ -1,8 +1,10 @@
 <script setup>
-import { onMounted, ref, onUnmounted } from 'vue';
+import { onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import logoUrl from '../../logo.svg';
 import notification from '@/utils/notification';
+import { useUpdaterStore } from '@/stores/updater';
 
 const { t } = useI18n();
 
@@ -10,14 +12,9 @@ const platformInfo = ref(null);
 const coreVersion = ref('');
 const appVersion = __APP_VERSION__;
 
-// 更新相关
-const updateInfo = ref(null);
-const checking = ref(false);
-const downloading = ref(false);
-const downloadProgress = ref(0);
-
-let unsubUpdateAvailable = null;
-let unsubDownloadProgress = null;
+// 更新状态从 store 获取，跨视图保持
+const updater = useUpdaterStore();
+const { updateInfo, checking, downloading, downloadProgress } = storeToRefs(updater);
 
 onMounted(async () => {
     try {
@@ -27,20 +24,8 @@ onMounted(async () => {
         // 降级
     }
 
-    // 监听启动时后台检查的新版本通知
-    unsubUpdateAvailable = window.api.manager.onUpdateAvailable((data) => {
-        updateInfo.value = data;
-    });
-
-    // 监听下载进度
-    unsubDownloadProgress = window.api.manager.onUpdateDownloadProgress((data) => {
-        downloadProgress.value = data.progress;
-    });
-});
-
-onUnmounted(() => {
-    if (unsubUpdateAvailable) unsubUpdateAvailable();
-    if (unsubDownloadProgress) unsubDownloadProgress();
+    // 确保全局事件监听已注册（store 内部只注册一次）
+    updater.ensureListeners();
 });
 
 const infoItems = [
@@ -60,10 +45,8 @@ async function openHomepage() {
 }
 
 async function checkUpdate() {
-    checking.value = true;
     try {
-        const result = await window.api.manager.updateCheck();
-        updateInfo.value = result;
+        const result = await updater.checkUpdate();
         if (!result.hasUpdate) {
             if (result.error) {
                 notification.error(t('about.update.checkFailed'));
@@ -73,29 +56,11 @@ async function checkUpdate() {
         }
     } catch (e) {
         notification.error(t('about.update.checkFailed'));
-    } finally {
-        checking.value = false;
     }
 }
 
 async function doUpdate() {
-    if (!updateInfo.value || !updateInfo.value.downloadUrl) return;
-    downloading.value = true;
-    downloadProgress.value = 0;
-    try {
-        const result = await window.api.manager.updateDownload(updateInfo.value.downloadUrl);
-        if (result.success) {
-            downloadProgress.value = 100;
-            // 启动安装包并退出 manager
-            await window.api.manager.updateInstall(result.installerPath);
-        } else {
-            downloading.value = false;
-            notification.error(result.error || t('about.update.downloadFailed'));
-        }
-    } catch (e) {
-        downloading.value = false;
-        notification.error(t('about.update.downloadFailed'));
-    }
+    await updater.downloadAndInstall(t, notification);
 }
 </script>
 
