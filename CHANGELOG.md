@@ -25,8 +25,10 @@ Sync web app launch command in launcher, native and web apps use injection/non-i
 ### fix | 问题修复 / Bug Fixes
 
 修复 zoom 放大快捷键需要 Ctrl+Shift++ 才能触发的问题，改为 Ctrl+= 直接触发
+修复关于页面切换路由后更新下载进度丢失的问题，将更新状态迁移至 Pinia store 跨视图保持
 
 Fix zoom-in shortcut requiring Ctrl+Shift++ to trigger, now works directly with Ctrl+=
+Fix update download progress lost when switching routes in About view, migrate update state to Pinia store for cross-view persistence
 
 ## [0.1.4] - 2026-07-16
 
