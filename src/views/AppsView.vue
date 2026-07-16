@@ -6,6 +6,7 @@ import { ElMessageBox } from 'element-plus';
 import { useAppsStore } from '@/stores/apps';
 import { useReposStore } from '@/stores/repos';
 import notification from '@/utils/notification';
+import WebAppEditor from './WebAppEditor.vue';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -14,6 +15,27 @@ const reposStore = useReposStore();
 const importing = ref(false);
 // installingDeveloper 提升至 store，避免路由切换组件卸载后状态丢失
 const installingDeveloper = computed(() => reposStore.installingDeveloper);
+
+// 网页应用创建/编辑对话框
+const webAppEditorVisible = ref(false);
+const webAppEditorMode = ref('create'); // 'create' | 'edit'
+const editingApp = ref(null);
+
+function handleCreateWebApp() {
+    webAppEditorMode.value = 'create';
+    editingApp.value = null;
+    webAppEditorVisible.value = true;
+}
+
+function handleEditWebApp(app) {
+    webAppEditorMode.value = 'edit';
+    editingApp.value = app;
+    webAppEditorVisible.value = true;
+}
+
+function onWebAppSuccess() {
+    appsStore.fetchApps();
+}
 
 // canbox-developer 的标识（package.json 的 id / name）
 const DEVELOPER_APP_ID = 'com.github.canbox-io.canbox-developer';
@@ -284,9 +306,14 @@ async function installDeveloper() {
     <div class="view-container">
         <div class="view-header">
             <h2 class="view-title">{{ $t('apps.title') }}</h2>
-            <el-button type="primary" @click="handleImport" :loading="importing">
-                📦 {{ $t('apps.import') }}
-            </el-button>
+            <div class="view-header-actions">
+                <el-button type="success" @click="handleCreateWebApp">
+                    🌐 {{ $t('webApp.create') }}
+                </el-button>
+                <el-button type="primary" @click="handleImport" :loading="importing">
+                    📦 {{ $t('apps.import') }}
+                </el-button>
+            </div>
         </div>
 
         <div v-if="appsStore.loading" class="loading-state">
@@ -314,6 +341,16 @@ async function installDeveloper() {
                     <div class="name-row">
                         <span class="app-name">{{ app.name }}</span>
                         <span class="app-version">v{{ app.version }}</span>
+                        <!-- 网页/PWA 角标 -->
+                        <el-tooltip
+                            v-if="app.type === 'web'"
+                            :content="app.isPwa ? $t('webApp.pwaBadge') : $t('webApp.webBadge')"
+                            placement="top"
+                        >
+                            <span class="type-badge" :class="{ 'pwa-badge': app.isPwa }">
+                                {{ app.isPwa ? 'PWA' : 'WEB' }}
+                            </span>
+                        </el-tooltip>
                         <!-- 更新提醒徽章 -->
                         <el-tooltip
                             v-if="appUpdates[app.appId]"
@@ -351,6 +388,14 @@ async function installDeveloper() {
                     <div class="app-actions">
                         <el-tooltip :content="$t('apps.launch')" placement="top">
                             <button class="icon-btn run-btn" @click="handleLaunch(app)">▶️</button>
+                        </el-tooltip>
+                        <!-- 仅网页/PWA APP 显示编辑按钮 -->
+                        <el-tooltip
+                            v-if="app.type === 'web'"
+                            :content="$t('webApp.edit')"
+                            placement="top"
+                        >
+                            <button class="icon-btn edit-btn" @click="handleEditWebApp(app)">✏️</button>
                         </el-tooltip>
                         <el-tooltip
                             v-if="appUpdates[app.appId]"
@@ -396,6 +441,14 @@ async function installDeveloper() {
                 </button>
             </div>
         </div>
+
+        <!-- 网页应用创建/编辑对话框 -->
+        <WebAppEditor
+            v-model:visible="webAppEditorVisible"
+            :mode="webAppEditorMode"
+            :edit-app="editingApp"
+            @success="onWebAppSuccess"
+        />
     </div>
 </template>
 
@@ -420,6 +473,10 @@ async function installDeveloper() {
     font-weight: 600;
     margin: 0;
     color: var(--el-text-color-primary);
+}
+.view-header-actions {
+    display: flex;
+    gap: 8px;
 }
 
 .empty-state,
@@ -521,6 +578,26 @@ async function installDeveloper() {
     font-size: 15px;
 }
 
+/* 网页/PWA 类型角标 */
+.type-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    background: var(--el-color-info-light-9);
+    color: var(--el-color-info-dark-2);
+    border: 1px solid var(--el-color-info-light-5);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.5px;
+}
+.type-badge.pwa-badge {
+    background: var(--el-color-success-light-9);
+    color: var(--el-color-success-dark-2);
+    border-color: var(--el-color-success-light-5);
+}
+
 /* 更新徽章 */
 .update-badge {
     display: inline-flex;
@@ -618,6 +695,7 @@ async function installDeveloper() {
     transform: translateY(0);
 }
 .run-btn:hover { background: var(--el-color-success-light-9); }
+.edit-btn:hover { background: var(--el-color-primary-light-9); }
 .update-btn { animation: update-pulse 2s ease-in-out infinite; }
 .update-btn:hover { background: var(--el-color-warning-light-9); }
 .repair-btn:hover { background: var(--el-color-primary-light-9); }

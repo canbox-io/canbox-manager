@@ -100,13 +100,15 @@ document.addEventListener('wheel', (e) => {
 
 document.addEventListener('keydown', (e) => {
     if (!e.ctrlKey) return;
-    if (e.key === '+' || e.key === '=') {
+    // 使用 e.code（物理按键，不受 Ctrl/Shift 修饰影响）判断
+    // 修复 Ctrl+= 不触发、必须 Ctrl+Shift+= 才能放大的问题
+    if (e.code === 'Equal') {
         e.preventDefault();
         adjustZoom(0.1);
-    } else if (e.key === '-' || e.key === '_') {
+    } else if (e.code === 'Minus') {
         e.preventDefault();
         adjustZoom(-0.1);
-    } else if (e.key === '0') {
+    } else if (e.code === 'Digit0' || e.code === 'Numpad0') {
         e.preventDefault();
         currentZoom = 1.0;
         window.api.manager.zoomReset();

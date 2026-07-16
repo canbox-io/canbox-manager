@@ -137,5 +137,30 @@
         "delete": "删除",
         "loading": "加载中...",
         "error": "操作失败"
+    },
+    "webApp": {
+        "create": "创建网页应用",
+        "createTitle": "创建网页应用",
+        "editTitle": "编辑网页应用",
+        "edit": "编辑",
+        "url": "网址",
+        "urlRequired": "请输入网址",
+        "name": "名称",
+        "nameRequired": "请输入应用名称",
+        "namePlaceholder": "如：我的网站",
+        "logo": "图标",
+        "logoHint": "自动抓取 PWA manifest 时填充",
+        "width": "宽度",
+        "height": "高度",
+        "menuBar": "菜单栏",
+        "menuBarHint": "关闭后窗口将不显示菜单栏，之后可在编辑中修改",
+        "fetch": "自动抓取",
+        "fetchSuccess": "已从 PWA manifest 抓取信息",
+        "fetchFailed": "未找到 PWA manifest，请手动填写",
+        "createSuccess": "网页应用创建成功",
+        "editSuccess": "网页应用已更新",
+        "submitFailed": "操作失败",
+        "webBadge": "网页应用",
+        "pwaBadge": "PWA 应用"
     }
 }

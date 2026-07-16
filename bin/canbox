@@ -64,7 +64,19 @@ case "${1:-}" in
             echo "[canbox] 错误: APP 不存在: $APP_ID (路径: $APP_DIR)" >&2
             exit 1
         fi
-        exec "$ELECTRON" -r "$CORE" "$APP_TARGET" "--app-id=$APP_ID" --no-sandbox
+        # 判断是否为网页应用（canbox.type === 'web'）
+        # 网页应用不注入 canbox-core，使用独立 userData，避免共享 profile 污染和初始化延迟
+        IS_WEB_APP=0
+        if [ -f "$APP_DIR/package.json" ]; then
+            if grep -q '"type"[[:space:]]*:[[:space:]]*"web"' "$APP_DIR/package.json" 2>/dev/null; then
+                IS_WEB_APP=1
+            fi
+        fi
+        if [ "$IS_WEB_APP" = "1" ]; then
+            exec "$ELECTRON" "$APP_TARGET" --no-sandbox
+        else
+            exec "$ELECTRON" -r "$CORE" "$APP_TARGET" "--app-id=$APP_ID" --no-sandbox
+        fi
         ;;
     *)
         echo "Canbox 启动器" >&2

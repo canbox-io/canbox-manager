@@ -137,6 +137,12 @@ ipcMain.handle('manager.apps.list', async () => {
                         author: pkg.author || '',
                         keywords: pkg.keywords || [],
                         platforms: pkg.platforms || [],
+                        // 类型标注：web（网页/PWA APP）或 native（普通 APP，缺省）
+                        type: (pkg.canbox && pkg.canbox.type) || 'native',
+                        // 仅网页 APP 有 isPwa 字段：是否从 PWA manifest 创建
+                        isPwa: !!(pkg.canbox && pkg.canbox.webApp && pkg.canbox.webApp.isPwa),
+                        // 网页 APP 的完整配置（编辑时预填充用）
+                        webAppConfig: (pkg.canbox && pkg.canbox.type === 'web' && pkg.canbox.webApp) ? pkg.canbox.webApp : null,
                         logo,
                         path: appDir
                     });
@@ -355,16 +361,25 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
         const asarPath = path.join(appDir, 'app.asar');
         const target = fs.existsSync(asarPath) ? asarPath : appDir;
 
-        // 统一启动方式：electron -r core/injection.js <target> --app-id=<id> --no-sandbox
-        // 开发和生产行为一致，每个 APP 是独立 electron 进程，加载自己的 package.json，
-        // WM_CLASS 由 APP 的 package.json name 决定，窗口正确分离。
-        const coreInjection = path.join(CORE_PATH, 'injection.js');
-        const child = spawn(process.execPath, [
-            '-r', coreInjection,
-            target,
-            `--app-id=${appId}`,
-            '--no-sandbox'
-        ], {
+        // 判断是否为网页应用（canbox.type === 'web'）
+        // 网页应用不注入 canbox-core，使用独立 userData，避免共享 profile 污染和初始化延迟
+        let isWebApp = false;
+        try {
+            const pkg = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf-8'));
+            isWebApp = !!(pkg.canbox && pkg.canbox.type === 'web');
+        } catch (e) {}
+
+        let electronArgs;
+        if (isWebApp) {
+            // 网页应用：自包含 main.js，不需要 canbox-core 服务
+            electronArgs = [target, '--no-sandbox'];
+        } else {
+            // 普通 APP：electron -r core/injection.js <target> --app-id=<id> --no-sandbox
+            const coreInjection = path.join(CORE_PATH, 'injection.js');
+            electronArgs = ['-r', coreInjection, target, `--app-id=${appId}`, '--no-sandbox'];
+        }
+
+        const child = spawn(process.execPath, electronArgs, {
             detached: true,
             stdio: 'ignore',
             env: { ...process.env, NODE_ENV: 'production' }
@@ -475,6 +490,392 @@ async function checkAllAppUpdates() {
 
 ipcMain.handle('manager.apps.checkUpdates', async () => {
     return checkAllAppUpdates();
+});
+
+// -- 网页应用管理 --
+// 将网址封装为最小化 Electron 网页壳 APP，存到 apps/{appId}/，走标准启动流程。
+// 生成的 APP 伪装 Chrome UA，提供菜单栏（含上一步/下一步），支持后续编辑。
+// PWA manifest 抓取：fetch 目标 URL 的 HTML，找 <link rel="manifest">，预填表单。
+
+// Chrome UA 伪装（避免网站识别为非标准浏览器而限制功能）
+const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+
+/**
+ * 抓取目标 URL 的 PWA manifest 信息，用于预填创建表单
+ * 失败时返回 { success: false }，前端静默回退到手填模式
+ */
+async function fetchWebAppManifest(url) {
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        // 1. fetch HTML
+        const res = await fetch(url, {
+            signal: controller.signal,
+            redirect: 'follow',
+            headers: { 'User-Agent': CHROME_UA }
+        });
+        clearTimeout(timeout);
+
+        if (!res.ok) {
+            return { success: false, error: `HTTP ${res.status}` };
+        }
+
+        const html = await res.text();
+        const finalUrl = res.url; // 重定向后的最终 URL
+
+        // 2. 找 <link rel="manifest" href="...">
+        const manifestMatch = html.match(/<link[^>]+rel=["']manifest["'][^>]*>/i);
+        if (!manifestMatch) {
+            return { success: false, error: 'No manifest link found' };
+        }
+
+        const hrefMatch = manifestMatch[0].match(/href=["']([^"']+)["']/i);
+        if (!hrefMatch) {
+            return { success: false, error: 'Manifest link has no href' };
+        }
+
+        // manifest URL 解析（相对路径 → 绝对路径）
+        const manifestUrl = new URL(hrefMatch[1], finalUrl).href;
+
+        // 3. fetch manifest.json
+        const controller2 = new AbortController();
+        const timeout2 = setTimeout(() => controller2.abort(), 5000);
+        const manifestRes = await fetch(manifestUrl, {
+            signal: controller2.signal,
+            headers: { 'User-Agent': CHROME_UA }
+        });
+        clearTimeout(timeout2);
+
+        if (!manifestRes.ok) {
+            return { success: false, error: `Manifest HTTP ${manifestRes.status}` };
+        }
+
+        const manifest = await manifestRes.json();
+
+        // 4. 选最大尺寸 PNG 图标下载
+        let iconBase64 = '';
+        if (Array.isArray(manifest.icons) && manifest.icons.length > 0) {
+            // 过滤 PNG 图标（避免 SVG 在某些桌面环境不显示）
+            const pngIcons = manifest.icons.filter(i => (i.src || '').toLowerCase().endsWith('.png'));
+            const candidates = pngIcons.length > 0 ? pngIcons : manifest.icons;
+            // 按 sizes 排序选最大（"512x512" → 512）
+            const sorted = candidates.slice().sort((a, b) => {
+                const sa = parseInt((a.sizes || '0').split('x')[0], 10) || 0;
+                const sb = parseInt((b.sizes || '0').split('x')[0], 10) || 0;
+                return sb - sa;
+            });
+            const icon = sorted[0];
+            if (icon.src) {
+                const iconUrl = new URL(icon.src, manifestUrl).href;
+                try {
+                    const controller3 = new AbortController();
+                    const timeout3 = setTimeout(() => controller3.abort(), 5000);
+                    const iconRes = await fetch(iconUrl, {
+                        signal: controller3.signal,
+                        headers: { 'User-Agent': CHROME_UA }
+                    });
+                    clearTimeout(timeout3);
+                    if (iconRes.ok) {
+                        const buf = Buffer.from(await iconRes.arrayBuffer());
+                        iconBase64 = `data:image/png;base64,${buf.toString('base64')}`;
+                    }
+                } catch (e) {
+                    // 图标下载失败不影响 manifest 抓取
+                }
+            }
+        }
+
+        return {
+            success: true,
+            manifestUrl,
+            finalUrl,
+            name: manifest.name || manifest.short_name || '',
+            shortName: manifest.short_name || '',
+            themeColor: manifest.theme_color || '',
+            backgroundColor: manifest.background_color || '',
+            display: manifest.display || '',
+            icon: iconBase64,
+            isPwa: true
+        };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+}
+
+ipcMain.handle('manager.webapp.fetchManifest', async (_e, url) => {
+    return fetchWebAppManifest(url);
+});
+
+/**
+ * 渲染生成的 main.js 模板
+ * @param {Object} config { url, name, width, height, menuBar, bgColor }
+ */
+function renderWebAppMainJs(config) {
+    const width = config.width || 1280;
+    const height = config.height || 800;
+    const bgColor = config.bgColor || '#ffffff';
+    const url = config.url;
+    const name = (config.name || '').replace(/'/g, "\\'");
+    const menuBar = config.menuBar !== false;
+
+    // 菜单模板（仅当 menuBar=true 时调用 setApplicationMenu）
+    const menuSetup = menuBar ? `
+    // 菜单固定显示，含上一步/下一步 + Alt+Left/Right 快捷键
+    const template = [
+        {
+            label: '文件',
+            submenu: [
+                { role: 'quit', label: '退出' },
+                { role: 'reload', label: '刷新' }
+            ]
+        },
+        {
+            label: '历史',
+            submenu: [
+                { label: '上一步', accelerator: 'Alt+Left', click: () => { if (win.webContents.navigationHistory.canGoBack()) win.webContents.navigationHistory.goBack(); } },
+                { label: '下一步', accelerator: 'Alt+Right', click: () => { if (win.webContents.navigationHistory.canGoForward()) win.webContents.navigationHistory.goForward(); } }
+            ]
+        },
+        {
+            label: '视图',
+            submenu: [
+                { label: '重置缩放', accelerator: 'Ctrl+0', click: () => { win.webContents.setZoomFactor(1.0); } },
+                { label: '放大', accelerator: 'Control+=', click: () => { adjustZoom(0.1); } },
+                { label: '缩小', accelerator: 'Control+-', click: () => { adjustZoom(-0.1); } },
+                { type: 'separator' },
+                { role: 'togglefullscreen', label: '全屏' },
+                { type: 'separator' },
+                { label: '开发者工具', accelerator: 'F12', click: () => { win.webContents.toggleDevTools(); } }
+            ]
+        },
+        {
+            label: '窗口',
+            submenu: [
+                { role: 'minimize', label: '最小化' }
+            ]
+        }
+    ];
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);` : `
+    // 菜单栏禁用：彻底不显示菜单
+    Menu.setApplicationMenu(null);`;
+
+    // 通用键盘快捷键监听（菜单显示/隐藏均生效，避免菜单关闭后快捷键失灵）
+    const shortcutSetup = `
+    // 缩放/重置/DevTools 快捷键：通过 before-input-event 在主进程拦截，菜单关闭时也生效
+    let _zoom = 1.0;
+    function adjustZoom(delta) {
+        _zoom = Math.max(0.5, Math.min(2.5, Math.round((_zoom + delta) * 10) / 10));
+        win.webContents.setZoomFactor(_zoom);
+    }
+    win.webContents.on('before-input-event', (e, input) => {
+        if (input.type !== 'keyDown') return;
+        const ctrl = input.control;
+        const code = input.code;
+        if (ctrl && code === 'Equal') { adjustZoom(0.1); e.preventDefault(); }
+        else if (ctrl && code === 'Minus') { adjustZoom(-0.1); e.preventDefault(); }
+        else if (ctrl && (code === 'Digit0' || code === 'Numpad0')) { _zoom = 1.0; win.webContents.setZoomFactor(1.0); e.preventDefault(); }
+        else if (code === 'F12') { win.webContents.toggleDevTools(); e.preventDefault(); }
+    });`;
+
+    return `// 自动生成的 Canbox 网页应用 main.js
+// 由 canbox-manager web-app-creator 生成
+const { app, BrowserWindow, Menu } = require('electron');
+
+// Chrome UA 伪装（避免网站识别为非标准浏览器而限制功能）
+const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+
+let win;
+app.whenReady().then(() => {
+    win = new BrowserWindow({
+        width: ${width},
+        height: ${height},
+        backgroundColor: '${bgColor}',
+        title: '${name}',
+        autoHideMenuBar: false,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+    win.webContents.setUserAgent(CHROME_UA);
+    win.loadURL('${url}');${shortcutSetup}${menuSetup}
+});
+
+app.on('window-all-closed', () => {
+    app.quit();
+});
+`;
+}
+
+/**
+ * 渲染 package.json 内容
+ */
+function renderWebAppPackageJson(config) {
+    const pkg = {
+        name: 'webapp-' + config.appId,
+        main: 'main.js',
+        version: '1.0.0',
+        displayName: config.name || 'Web App',
+        description: 'Web App: ' + config.url,
+        canbox: {
+            type: 'web',
+            webApp: {
+                url: config.url,
+                isPwa: !!config.isPwa,
+                manifestUrl: config.manifestUrl || '',
+                themeColor: config.themeColor || '',
+                backgroundColor: config.bgColor || '',
+                menuBar: config.menuBar !== false,
+                width: config.width || 1280,
+                height: config.height || 800
+            }
+        }
+    };
+    return JSON.stringify(pkg, null, 4);
+}
+
+/**
+ * 创建网页应用
+ * @param {Object} config { url, name, logo(base64 data URI), width, height, menuBar, isPwa, manifestUrl, themeColor, bgColor }
+ */
+async function createWebApp(config) {
+    if (!config || !config.url) {
+        return { success: false, error: 'URL is required' };
+    }
+
+    const appId = generateAppId();
+    const destPath = path.join(USERS_PATH, 'apps', appId);
+
+    try {
+        fs.mkdirSync(destPath, { recursive: true });
+
+        // 写 package.json
+        const pkgContent = renderWebAppPackageJson({
+            appId,
+            url: config.url,
+            name: config.name,
+            isPwa: config.isPwa,
+            manifestUrl: config.manifestUrl,
+            themeColor: config.themeColor,
+            bgColor: config.bgColor,
+            menuBar: config.menuBar,
+            width: config.width,
+            height: config.height
+        });
+        fs.writeFileSync(path.join(destPath, 'package.json'), pkgContent, 'utf-8');
+
+        // 写 main.js
+        const mainJsContent = renderWebAppMainJs({
+            url: config.url,
+            name: config.name,
+            width: config.width,
+            height: config.height,
+            menuBar: config.menuBar,
+            bgColor: config.bgColor
+        });
+        fs.writeFileSync(path.join(destPath, 'main.js'), mainJsContent, 'utf-8');
+
+        // 写 logo.png（base64 → 二进制）
+        if (config.logo && config.logo.startsWith('data:image/')) {
+            const base64Data = config.logo.split(',')[1];
+            if (base64Data) {
+                fs.writeFileSync(path.join(destPath, 'logo.png'), Buffer.from(base64Data, 'base64'));
+            }
+        }
+
+        // 生成 launcher（与普通 APP 导入一致）
+        const appInfo = readAppInfo(appId);
+        if (appInfo) appLauncher.generateLauncher(appInfo);
+
+        console.log('[manager] 创建网页应用:', appId, config.url);
+        return { success: true, appId };
+    } catch (e) {
+        // 失败时清理已创建的目录
+        try {
+            if (fs.existsSync(destPath)) {
+                const originalFs = require('original-fs');
+                originalFs.rmSync(destPath, { recursive: true, force: true });
+            }
+        } catch (cleanupErr) {}
+        return { success: false, error: e.message };
+    }
+}
+
+ipcMain.handle('manager.webapp.create', async (_e, config) => {
+    return createWebApp(config);
+});
+
+/**
+ * 编辑网页应用（保留 appId 和数据，重新生成 main.js + package.json + logo）
+ * @param {string} appId 已有网页 APP 的 appId
+ * @param {Object} config 新的配置
+ */
+async function editWebApp(appId, config) {
+    const destPath = path.join(USERS_PATH, 'apps', appId);
+    if (!fs.existsSync(destPath)) {
+        return { success: false, error: 'APP not found' };
+    }
+
+    // 校验：仅网页 APP 可编辑
+    const pkgPath = path.join(destPath, 'package.json');
+    if (!fs.existsSync(pkgPath)) {
+        return { success: false, error: 'package.json not found' };
+    }
+    const oldPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    if (!oldPkg.canbox || oldPkg.canbox.type !== 'web') {
+        return { success: false, error: 'Only web app can be edited' };
+    }
+
+    try {
+        // 覆盖写 package.json
+        const pkgContent = renderWebAppPackageJson({
+            appId,
+            url: config.url,
+            name: config.name,
+            isPwa: config.isPwa,
+            manifestUrl: config.manifestUrl,
+            themeColor: config.themeColor,
+            bgColor: config.bgColor,
+            menuBar: config.menuBar,
+            width: config.width,
+            height: config.height
+        });
+        fs.writeFileSync(pkgPath, pkgContent, 'utf-8');
+
+        // 覆盖写 main.js
+        const mainJsContent = renderWebAppMainJs({
+            url: config.url,
+            name: config.name,
+            width: config.width,
+            height: config.height,
+            menuBar: config.menuBar,
+            bgColor: config.bgColor
+        });
+        fs.writeFileSync(path.join(destPath, 'main.js'), mainJsContent, 'utf-8');
+
+        // 覆盖写 logo.png（如提供）
+        if (config.logo && config.logo.startsWith('data:image/')) {
+            const base64Data = config.logo.split(',')[1];
+            if (base64Data) {
+                fs.writeFileSync(path.join(destPath, 'logo.png'), Buffer.from(base64Data, 'base64'));
+            }
+        }
+
+        // 重新生成 launcher（force=true 强制覆盖）
+        const appInfo = readAppInfo(appId);
+        if (appInfo) appLauncher.generateLauncher(appInfo, { force: true });
+
+        console.log('[manager] 编辑网页应用:', appId, config.url);
+        return { success: true, appId };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+}
+
+ipcMain.handle('manager.webapp.edit', async (_e, appId, config) => {
+    return editWebApp(appId, config);
 });
 
 // -- 仓库管理 --

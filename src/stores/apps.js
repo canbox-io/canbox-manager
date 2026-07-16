@@ -44,6 +44,27 @@ export const useAppsStore = defineStore('apps', () => {
         return await window.api.manager.appsCheckUpdates();
     }
 
+    // 网页应用管理
+    async function fetchManifest(url) {
+        return await window.api.manager.webappFetchManifest(url);
+    }
+
+    async function createWebApp(config) {
+        const result = await window.api.manager.webappCreate(config);
+        if (result.success) {
+            await fetchApps();
+        }
+        return result;
+    }
+
+    async function editWebApp(appId, config) {
+        const result = await window.api.manager.webappEdit(appId, config);
+        if (result.success) {
+            await fetchApps();
+        }
+        return result;
+    }
+
     return {
         apps,
         loading,
@@ -52,6 +73,9 @@ export const useAppsStore = defineStore('apps', () => {
         removeApp,
         launchApp,
         clearAppData,
-        checkUpdates
+        checkUpdates,
+        fetchManifest,
+        createWebApp,
+        editWebApp
     };
 });

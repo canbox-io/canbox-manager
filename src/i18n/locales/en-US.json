@@ -142,5 +142,30 @@
         "delete": "Delete",
         "loading": "Loading...",
         "error": "Operation failed"
+    },
+    "webApp": {
+        "create": "Create Web App",
+        "createTitle": "Create Web App",
+        "editTitle": "Edit Web App",
+        "edit": "Edit",
+        "url": "URL",
+        "urlRequired": "Please enter a URL",
+        "name": "Name",
+        "nameRequired": "Please enter an app name",
+        "namePlaceholder": "e.g. My Website",
+        "logo": "Logo",
+        "logoHint": "Auto-filled from PWA manifest",
+        "width": "Width",
+        "height": "Height",
+        "menuBar": "Menu Bar",
+        "menuBarHint": "If off, the window will not show a menu bar. You can change this later via Edit.",
+        "fetch": "Auto Fetch",
+        "fetchSuccess": "Info fetched from PWA manifest",
+        "fetchFailed": "No PWA manifest found, please fill manually",
+        "createSuccess": "Web app created",
+        "editSuccess": "Web app updated",
+        "submitFailed": "Operation failed",
+        "webBadge": "Web App",
+        "pwaBadge": "PWA App"
     }
 }

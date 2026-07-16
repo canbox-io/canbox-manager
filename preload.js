@@ -58,6 +58,11 @@ const api = {
             return () => ipcRenderer.removeListener('manager.apps.updatesAvailable', handler);
         },
 
+        // 网页应用管理
+        webappFetchManifest: (url) => ipcRenderer.invoke('manager.webapp.fetchManifest', url),
+        webappCreate: (config) => ipcRenderer.invoke('manager.webapp.create', config),
+        webappEdit: (appId, config) => ipcRenderer.invoke('manager.webapp.edit', appId, config),
+
         // 仓库管理
         reposList: () => ipcRenderer.invoke('manager.repos.list'),
         reposAdd: (url) => ipcRenderer.invoke('manager.repos.add', url),
