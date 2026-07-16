@@ -4,6 +4,30 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.1.5] - 2026-07-16
+
+### feat | 新功能 / Features
+
+新增创建网页应用功能，将任意网址封装为桌面应用，自动抓取 PWA manifest 预填名称与图标
+网页应用支持 Chrome UA 伪装、菜单栏定制、导航快捷键（Alt+Left/Right）、缩放控制（Ctrl+=/-/0）与开发者工具（F12）
+网页应用使用独立 userData 路径，不注入 canbox-core，与平台数据完全隔离
+APP 列表显示网页/PWA 应用角标（WEB 灰色 / PWA 绿色），仅网页应用显示编辑按钮
+支持编辑网页应用，可修改名称、网址、图标、窗口尺寸与菜单栏开关
+网页应用启动命令同步 launcher，普通 APP 与网页应用分别走注入/非注入启动流程
+
+Add web app creation feature, wrap any URL as a desktop app with auto PWA manifest scraping for name and icon
+Web apps support Chrome UA spoofing, customizable menu bar, navigation shortcuts (Alt+Left/Right), zoom controls (Ctrl+=/-/0) and DevTools (F12)
+Web apps use isolated userData path, no canbox-core injection, fully separated from platform data
+Display WEB/PWA badges on app list (WEB gray / PWA green), edit button shown only for web apps
+Support editing web apps, modify name, URL, icon, window size and menu bar toggle
+Sync web app launch command in launcher, native and web apps use injection/non-injection launch paths respectively
+
+### fix | 问题修复 / Bug Fixes
+
+修复 zoom 放大快捷键需要 Ctrl+Shift++ 才能触发的问题，改为 Ctrl+= 直接触发
+
+Fix zoom-in shortcut requiring Ctrl+Shift++ to trigger, now works directly with Ctrl+=
+
 ## [0.1.4] - 2026-07-16
 
 ### feat | 新功能 / Features
