@@ -114,8 +114,10 @@ ipcMain.handle('manager.apps.list', async () => {
                     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
                     // 读 logo（base64 data URI）
                     let logo = '';
+                    // pkg.logo 可能指向子目录（如 public/logo.png），但打包时可能被拍平到根，
+                    // 因此除 pkg.logo 外也尝试 basename 作为回退
                     const logoCandidates = pkg.logo
-                        ? [pkg.logo]
+                        ? [pkg.logo, path.basename(pkg.logo)]
                         : ['logo.png', 'logo.svg', 'icon.png'];
                     for (const candidate of logoCandidates) {
                         const logoPath = path.join(appDir, candidate);
@@ -255,7 +257,7 @@ function readAppInfo(appId) {
     try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
         let logo = '';
-        const logoCandidates = pkg.logo ? [pkg.logo] : ['logo.png', 'logo.svg', 'icon.png'];
+        const logoCandidates = pkg.logo ? [pkg.logo, path.basename(pkg.logo)] : ['logo.png', 'logo.svg', 'icon.png'];
         for (const candidate of logoCandidates) {
             const logoPath = path.join(appDir, candidate);
             if (fs.existsSync(logoPath)) {
@@ -940,6 +942,9 @@ async function editWebApp(appId, config) {
         }
 
         // 重新生成 launcher（force=true 强制覆盖）
+        // 先删除旧 launcher：name 可能变更，旧文件名与新的不同，不删会残留
+        const oldName = oldPkg.displayName || oldPkg.name || appId;
+        appLauncher.deleteLauncher(oldName);
         const appInfo = readAppInfo(appId);
         if (appInfo) appLauncher.generateLauncher(appInfo, { force: true });
 
