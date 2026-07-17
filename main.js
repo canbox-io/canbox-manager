@@ -681,16 +681,61 @@ function renderWebAppMainJs(config) {
 
     return `// 自动生成的 Canbox 网页应用 main.js
 // 由 canbox-manager web-app-creator 生成
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, screen } = require('electron');
+const fs = require('fs');
+const path = require('path');
 
 // Chrome UA 伪装（避免网站识别为非标准浏览器而限制功能）
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
+// 窗口状态文件（存于本应用独立 userData 目录）
+const stateFile = path.join(app.getPath('userData'), 'window-state.json');
+
+// 读取上次窗口状态
+function loadWindowState() {
+    try {
+        const raw = fs.readFileSync(stateFile, 'utf8');
+        return JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+}
+
+// 保存窗口状态到文件
+function saveWindowState() {
+    if (!win || win.isDestroyed()) return;
+    const isMaximized = win.isMaximized();
+    const isFullScreen = win.isFullScreen();
+    const bounds = (isMaximized || isFullScreen) ? null : win.getBounds();
+    const state = {
+        bounds,
+        isMaximized,
+        isFullScreen
+    };
+    try {
+        fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+    } catch (e) {
+        // 忽略写入失败
+    }
+}
+
+// 校验 bounds 是否在某个显示器可视范围内
+function isBoundsVisible(bounds) {
+    if (!bounds) return false;
+    const display = screen.getDisplayMatching(bounds);
+    const area = display.workArea;
+    return bounds.x + bounds.width > area.x &&
+           bounds.x < area.x + area.width &&
+           bounds.y + bounds.height > area.y &&
+           bounds.y < area.y + area.height;
+}
+
+const savedState = loadWindowState();
+const useSavedBounds = savedState && savedState.bounds && isBoundsVisible(savedState.bounds);
+
 let win;
 app.whenReady().then(() => {
-    win = new BrowserWindow({
-        width: ${width},
-        height: ${height},
+    const windowOptions = {
         backgroundColor: '${bgColor}',
         title: '${name}',
         autoHideMenuBar: false,
@@ -698,9 +743,40 @@ app.whenReady().then(() => {
             nodeIntegration: false,
             contextIsolation: true
         }
-    });
+    };
+    if (useSavedBounds) {
+        Object.assign(windowOptions, {
+            x: savedState.bounds.x,
+            y: savedState.bounds.y,
+            width: savedState.bounds.width,
+            height: savedState.bounds.height
+        });
+    } else {
+        windowOptions.width = ${width};
+        windowOptions.height = ${height};
+    }
+    win = new BrowserWindow(windowOptions);
+    if (savedState && savedState.isMaximized) win.maximize();
+    if (savedState && savedState.isFullScreen) win.setFullScreen(true);
+
     win.webContents.setUserAgent(CHROME_UA);
     win.loadURL('${url}');${shortcutSetup}${menuSetup}
+
+    // 监听窗口变化，debounce 保存
+    let saveTimer = null;
+    const scheduleSave = () => {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveWindowState, 300);
+    };
+    win.on('resize', scheduleSave);
+    win.on('move', scheduleSave);
+    win.on('maximize', scheduleSave);
+    win.on('unmaximize', scheduleSave);
+    win.on('enter-full-screen', scheduleSave);
+    win.on('leave-full-screen', scheduleSave);
+
+    // 退出前强制保存
+    win.on('close', saveWindowState);
 });
 
 app.on('window-all-closed', () => {
