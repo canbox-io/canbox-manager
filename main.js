@@ -1649,6 +1649,7 @@ async function downloadFileWithProgress(url, destPath, onProgress, controller) {
 ipcMain.handle('manager.electron.listAllowed', async () => {
     const builtin = scanBuiltinVersions(CANBOX_HOME);
     const downloaded = readDownloadedRegistry(env.userData);
+    console.log('[main] listAllowed 注册表内容:', JSON.stringify(downloaded));
     const installedVersions = new Set(builtin.map(v => v.version));
     Object.values(downloaded.installedVersions || {}).forEach(v => {
         if (v.electron) installedVersions.add(v.electron);
@@ -1661,6 +1662,7 @@ ipcMain.handle('manager.electron.listAllowed', async () => {
                 (downloaded.installedVersions && Object.values(downloaded.installedVersions).find(v => v.electron === ver) ? 'downloaded' : null),
         supported: !!(ALLOWED_ELECTRON[ver].download && ALLOWED_ELECTRON[ver].download[platformKey])
     }));
+    console.log('[main] listAllowed 返回:', JSON.stringify(list.map(v => `${v.version}=${v.source}`)));
     list.sort((a, b) => {
         const va = a.version.split('.').map(Number);
         const vb = b.version.split('.').map(Number);
@@ -1741,6 +1743,7 @@ ipcMain.handle('manager.electron.download', async (_e, version) => {
 
         // 4. 写入注册表
         const registryPath = getRegistryPath(env.userData);
+        console.log('[main] download 写注册表前, 路径:', registryPath);
         fs.mkdirSync(path.dirname(registryPath), { recursive: true });
         const registry = readDownloadedRegistry(env.userData);
         registry.installedVersions = registry.installedVersions || {};
@@ -1751,6 +1754,7 @@ ipcMain.handle('manager.electron.download', async (_e, version) => {
             installedAt: Date.now()
         };
         fs.writeFileSync(registryPath, JSON.stringify(registry, null, 4), 'utf-8');
+        console.log('[main] download 写注册表后, 注册表内容:', JSON.stringify(registry));
 
         // 下载完成后：为依赖此 electron 版本且尚未生成 launcher 的 APP 补生成 launcher
         try {
@@ -1759,6 +1763,7 @@ ipcMain.handle('manager.electron.download', async (_e, version) => {
             console.warn('[manager] 补生成 launcher 失败:', e.message);
         }
 
+        console.log('[main] download 完成, 返回 success, version:', version);
         return { success: true, version, path: targetDir };
     } catch (e) {
         // 失败时清理半成品目录

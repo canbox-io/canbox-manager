@@ -41,12 +41,16 @@ const loadVersions = async () => {
     loading.value = true;
     try {
         const res = await window.api.manager.electronListAllowed();
+        console.log('[ElectronVersionsView] loadVersions 返回:', JSON.stringify(res));
         if (res.success) {
             versions.value = res.versions;
+            console.log('[ElectronVersionsView] versions 已更新, 当前行 source:',
+                res.versions.map(v => `${v.version}=${v.source}`).join(', '));
         } else {
             notification.error(t('electronVersions.loadFailed'));
         }
     } catch (e) {
+        console.error('[ElectronVersionsView] loadVersions 异常:', e);
         notification.error(t('electronVersions.loadFailedDetail', { error: e.message }));
     } finally {
         loading.value = false;
@@ -67,9 +71,20 @@ const handleDownload = async (version) => {
     }
     try {
         const res = await electronStore.downloadElectron(version);
+        console.log('[ElectronVersionsView] handleDownload 下载结果:', JSON.stringify(res));
         if (res.success) {
             notification.success(t('electronVersions.downloadSuccess', { version }));
+            // 即时更新表格中该版本行的状态（避免 loadVersions 返回前 UI 显示"未安装"）
+            // 通过替换数组引用强制触发响应式更新
+            versions.value = versions.value.map(v =>
+                v.version === version
+                    ? { ...v, source: 'downloaded', installed: true }
+                    : v
+            );
+            console.log('[ElectronVersionsView] 即时更新后 versions:', versions.value.map(v => `${v.version}=${v.source}`).join(', '));
+            // 再拉取完整列表确保数据一致
             await loadVersions();
+            console.log('[ElectronVersionsView] loadVersions 后 versions:', versions.value.map(v => `${v.version}=${v.source}`).join(', '));
             // 刷新 APP 列表：依赖该版本的 APP 现在可运行了（electronStatus 更新）
             // 主进程侧已补生成 launcher，这里同步前端状态
             await appsStore.fetchApps();
@@ -77,6 +92,7 @@ const handleDownload = async (version) => {
             notification.error(t('electronVersions.downloadFailed', { version, error: res.error }), t('electronVersions.downloadFailedTitle'));
         }
     } catch (e) {
+        console.error('[ElectronVersionsView] handleDownload 异常:', e);
         notification.error(t('electronVersions.downloadError', { version, error: e.message }), t('electronVersions.downloadFailedTitle'));
     }
 };
@@ -179,6 +195,7 @@ onMounted(() => {
             <el-table
                 :data="versions"
                 style="width: 100%"
+                row-key="version"
                 :row-class-name="tableRowClassName"
                 :row-style="tableRowStyle"
             >

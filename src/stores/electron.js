@@ -52,9 +52,11 @@ export const useElectronStore = defineStore('electron', () => {
         lastResult.value = null;
         try {
             const r = await window.api.manager.electronDownload(version);
+            console.log('[electronStore] downloadElectron IPC 返回:', JSON.stringify(r));
             lastResult.value = r;
             return r;
         } finally {
+            console.log('[electronStore] finally 执行, 清空 downloadingVersion');
             downloadingVersion.value = null;
             downloadProgress.value = 0;
         }
