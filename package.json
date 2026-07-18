@@ -1,6 +1,6 @@
 {
     "name": "canbox-manager",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "description": "Canbox 管理器 APP — APP 注册管理、仓库管理、系统设置",
     "main": "main.js",
     "license": "Apache-2.0",
@@ -24,7 +24,7 @@
     },
     "devDependencies": {
         "@vitejs/plugin-vue": "^5.1.2",
-        "electron": "^42.5.1",
+        "electron": "42.5.1",
         "vite": "^5.4.6"
     }
 }

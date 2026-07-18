@@ -961,8 +961,8 @@ async function createWebApp(config) {
         fs.writeFileSync(path.join(destPath, 'package.json'), pkgContent, 'utf-8');
 
         // 写 .canbox-app（canbox 平台配置，与 package.json 分离）
-        // web app 使用当前 manager 的 electron 版本（builtin）
-        const electronRange = '^' + process.versions.electron;
+        // web app 使用当前 manager 的 electron 精确版本（builtin），去掉 ^ 避免范围漂移到未在白名单中的版本
+        const electronRange = process.versions.electron;
         const webAppConfig = {
             url: config.url,
             isPwa: !!config.isPwa,

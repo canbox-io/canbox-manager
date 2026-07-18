@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.1.7] - 2026-07-18
+
+### fix | 问题修复 / Bug Fixes
+
+锁定 electron 版本为 42.5.1，避免 `^` 范围解析到最新版本时镜像同步延迟导致 CI 构建失败
+锁定 web app 创建时的 electron range 为精确版本（去掉 `^`），与当前 builtin 一致，避免范围漂移到未在白名单中的版本
+
+Lock electron version to 42.5.1 to prevent CI build failures caused by mirror sync delay when `^` range resolves to latest version
+Lock web app electron range to exact version (drop `^`), aligned with current builtin to avoid range drift to versions not in whitelist
+
 ## [0.1.6] - 2026-07-18
 
 ### feat | 新功能 / Features
