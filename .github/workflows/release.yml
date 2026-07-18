@@ -43,16 +43,23 @@ jobs:
         run: npm install --no-audit --no-fund
         working-directory: canbox-manager
 
-      - name: Diagnose electron installation
+      - name: Ensure electron binary downloaded
         run: |
           echo "=== electron package version ==="
           cat node_modules/electron/package.json | grep '"version"'
-          echo "=== electron dist directory ==="
-          ls -la node_modules/electron/dist/ 2>&1 || echo "dist directory NOT FOUND"
+          echo "=== before: electron dist directory ==="
+          ls -la node_modules/electron/dist/ 2>&1 || echo "dist directory NOT FOUND before explicit install"
+          # 如果 dist 目录不存在，显式触发 electron 的 install.js
+          if [ ! -d node_modules/electron/dist ]; then
+            echo "=== dist not found, running electron install.js explicitly ==="
+            node node_modules/electron/install.js
+            echo "=== after: electron dist directory ==="
+            ls -la node_modules/electron/dist/ 2>&1 || echo "dist directory STILL NOT FOUND"
+          else
+            echo "=== dist already exists, skip explicit install ==="
+          fi
           echo "=== electron path.txt ==="
           cat node_modules/electron/path.txt 2>&1 || echo "path.txt NOT FOUND"
-          echo "=== electron cache ==="
-          ls -la ~/.cache/electron/ 2>&1 || echo "no electron cache"
         working-directory: canbox-manager
 
       - name: Build Linux installer
