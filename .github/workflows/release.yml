@@ -31,18 +31,30 @@ jobs:
           registry-url: https://registry.npmmirror.com/
 
       - name: Install canbox-core dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --unsafe-perm
         working-directory: canbox-core
         env:
-          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
-          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+          ELECTRON_MIRROR: https://cdn.npmmirror.com/binaries/electron/
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://cdn.npmmirror.com/binaries/electron-builder-binaries/
 
       - name: Install canbox-manager dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --unsafe-perm
         working-directory: canbox-manager
         env:
-          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
-          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+          ELECTRON_MIRROR: https://cdn.npmmirror.com/binaries/electron/
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://cdn.npmmirror.com/binaries/electron-builder-binaries/
+
+      - name: Diagnose electron installation
+        run: |
+          echo "=== electron package version ==="
+          cat node_modules/electron/package.json | grep '"version"'
+          echo "=== electron dist directory ==="
+          ls -la node_modules/electron/dist/ 2>&1 || echo "dist directory NOT FOUND"
+          echo "=== electron path.txt ==="
+          cat node_modules/electron/path.txt 2>&1 || echo "path.txt NOT FOUND"
+          echo "=== electron cache ==="
+          ls -la ~/.cache/electron/ 2>&1 || echo "no electron cache"
+        working-directory: canbox-manager
 
       - name: Build Linux installer
         run: npm run dist:linux
