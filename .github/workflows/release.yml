@@ -30,19 +30,18 @@ jobs:
           node-version: '24'
           registry-url: https://registry.npmmirror.com/
 
+      - name: Set Electron mirror
+        run: |
+          echo "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" >> $GITHUB_ENV
+          echo "ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/" >> $GITHUB_ENV
+
       - name: Install canbox-core dependencies
-        run: npm install --no-audit --no-fund --unsafe-perm
+        run: npm install --no-audit --no-fund
         working-directory: canbox-core
-        env:
-          ELECTRON_MIRROR: https://cdn.npmmirror.com/binaries/electron/
-          ELECTRON_BUILDER_BINARIES_MIRROR: https://cdn.npmmirror.com/binaries/electron-builder-binaries/
 
       - name: Install canbox-manager dependencies
-        run: npm install --no-audit --no-fund --unsafe-perm
+        run: npm install --no-audit --no-fund
         working-directory: canbox-manager
-        env:
-          ELECTRON_MIRROR: https://cdn.npmmirror.com/binaries/electron/
-          ELECTRON_BUILDER_BINARIES_MIRROR: https://cdn.npmmirror.com/binaries/electron-builder-binaries/
 
       - name: Diagnose electron installation
         run: |
