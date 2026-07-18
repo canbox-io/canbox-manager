@@ -26,7 +26,9 @@ import {
     ElButton, ElCard, ElTag, ElEmpty, ElTooltip,
     ElDialog, ElForm, ElFormItem, ElInput,
     ElSelect, ElOption, ElSwitch, ElInputNumber,
-    ElDrawer, ElProgress
+    ElDrawer, ElProgress,
+    ElTable, ElTableColumn, ElAlert,
+    ElLoading
 } from 'element-plus';
 
 import './assets/styles.css';
@@ -71,6 +73,12 @@ app.component('ElSwitch', ElSwitch);
 app.component('ElInputNumber', ElInputNumber);
 app.component('ElDrawer', ElDrawer);
 app.component('ElProgress', ElProgress);
+app.component('ElTable', ElTable);
+app.component('ElTableColumn', ElTableColumn);
+app.component('ElAlert', ElAlert);
+
+// v-loading 指令（Element Plus 的 Loading 指令）
+app.directive('loading', ElLoading.directive);
 
 app.mount('#app');
 const _tMounted = performance.now();

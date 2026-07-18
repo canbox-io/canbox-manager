@@ -1,12 +1,14 @@
 {
     "app": {
-        "name": "Canbox Manager"
+        "name": "Canbox Manager",
+        "version": "0.1.0"
     },
     "nav": {
         "apps": "My Apps",
         "repos": "App Repos",
         "settings": "Settings",
-        "about": "About"
+        "about": "About",
+        "electron": "Electron Versions"
     },
     "apps": {
         "title": "My Apps",
@@ -21,6 +23,15 @@
         "removeSuccess": "APP removed",
         "launch": "Launch",
         "launchFailed": "Launch failed",
+        "electronMissingTitle": "Electron Download Required",
+        "electronMissingPrompt": "\"{name}\" requires Electron v{version}, which is not installed locally. Download now?",
+        "electronDownloadNow": "Download Now",
+        "electronDownloadLater": "Later",
+        "electronDownloadFailed": "Electron download failed",
+        "electronDownloadFailedDetail": "Electron v{version} download failed: {error}",
+        "electronDownloadDone": "Electron downloaded, starting app",
+        "electronMissingTooltip": "Missing Electron v{version} declared by this APP. Click launch to prompt download.",
+        "electronMissingBadge": "Needs Electron v{version}",
         "clearData": "Clear Data",
         "clearDataConfirm": "Are you sure you want to clear this app's data?",
         "clearDataSuccess": "Data cleared",

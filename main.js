@@ -39,6 +39,8 @@ const CORE_PATH = global.__CANBOX_CORE_PATH__;
 const repoProbe = require('./repo-probe');
 const appLauncher = require('./app-launcher');
 const updater = require('./updater');
+const { readCanboxMeta, writeCanboxMeta, createWebMeta } = require(path.join(CORE_PATH, 'lib', 'canbox-meta'));
+const { resolveElectron } = require(path.join(CORE_PATH, 'lib', 'electron-selector'));
 
 let mainWindow = null;
 
@@ -130,6 +132,27 @@ ipcMain.handle('manager.apps.list', async () => {
                             break;
                         }
                     }
+                    // canbox 平台配置从 .canbox-app 读取（与 package.json 分离）
+                    const meta = readCanboxMeta(appDir);
+                    const metaType = (meta && meta.type) || 'native';
+                    const webApp = (meta && meta.webApp) || null;
+                    // 校验 electron 版本是否已安装（builtin + downloaded）
+                    // 用于 UI 显示警告徽标，引导用户下载缺失版本
+                    let electronStatus = { ok: true };
+                    if (metaType === 'native' && meta && meta.electron && meta.electron.range) {
+                        const canboxHome = path.dirname(CORE_PATH);
+                        const probe = resolveElectron(appDir, canboxHome, env.userData);
+                        if (probe.error) {
+                            electronStatus = { ok: false, error: probe.error };
+                        } else if (probe.needDownload) {
+                            electronStatus = {
+                                ok: false,
+                                needDownload: true,
+                                version: probe.version,
+                                url: probe.url
+                            };
+                        }
+                    }
                     apps.push({
                         appId: entry.name,
                         id: pkg.id || pkg.name || entry.name,
@@ -140,11 +163,13 @@ ipcMain.handle('manager.apps.list', async () => {
                         keywords: pkg.keywords || [],
                         platforms: pkg.platforms || [],
                         // 类型标注：web（网页/PWA APP）或 native（普通 APP，缺省）
-                        type: (pkg.canbox && pkg.canbox.type) || 'native',
+                        type: metaType,
                         // 仅网页 APP 有 isPwa 字段：是否从 PWA manifest 创建
-                        isPwa: !!(pkg.canbox && pkg.canbox.webApp && pkg.canbox.webApp.isPwa),
+                        isPwa: !!(webApp && webApp.isPwa),
                         // 网页 APP 的完整配置（编辑时预填充用）
-                        webAppConfig: (pkg.canbox && pkg.canbox.type === 'web' && pkg.canbox.webApp) ? pkg.canbox.webApp : null,
+                        webAppConfig: (metaType === 'web' && webApp) ? webApp : null,
+                        // electron 版本状态：ok=true 表示已就绪；ok=false 时附 needDownload/version
+                        electronStatus,
                         logo,
                         path: appDir
                     });
@@ -363,13 +388,10 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
         const asarPath = path.join(appDir, 'app.asar');
         const target = fs.existsSync(asarPath) ? asarPath : appDir;
 
-        // 判断是否为网页应用（canbox.type === 'web'）
+        // 判断是否为网页应用（.canbox-app 中 type === 'web'）
         // 网页应用不注入 canbox-core，使用独立 userData，避免共享 profile 污染和初始化延迟
-        let isWebApp = false;
-        try {
-            const pkg = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf-8'));
-            isWebApp = !!(pkg.canbox && pkg.canbox.type === 'web');
-        } catch (e) {}
+        const meta = readCanboxMeta(appDir);
+        const isWebApp = !!(meta && meta.type === 'web');
 
         let electronArgs;
         if (isWebApp) {
@@ -381,7 +403,25 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
             electronArgs = ['-r', coreInjection, target, `--app-id=${appId}`, '--no-sandbox'];
         }
 
-        const child = spawn(process.execPath, electronArgs, {
+        // 通过 selector 选择 APP 声明的 electron 版本
+        // canboxHome = CORE_PATH 的上级目录（CANBOX_HOME/canbox-core → CANBOX_HOME）
+        const canboxHome = path.dirname(CORE_PATH);
+        const electronResult = resolveElectron(appDir, canboxHome, env.userData);
+        if (electronResult.error) {
+            return { success: false, error: electronResult.error };
+        }
+        if (electronResult.needDownload) {
+            // 结构化返回，让前端弹出下载引导对话框
+            return {
+                success: false,
+                needDownload: true,
+                version: electronResult.version,
+                url: electronResult.url
+            };
+        }
+        const electronPath = electronResult.path;
+
+        const child = spawn(electronPath, electronArgs, {
             detached: true,
             stdio: 'ignore',
             env: { ...process.env, NODE_ENV: 'production' }
@@ -396,7 +436,7 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
             });
         }
 
-        console.log('[manager] 启动 APP:', appId, 'pid=', child.pid, 'electron=', process.execPath);
+        console.log('[manager] 启动 APP:', appId, 'pid=', child.pid, 'electron=', electronPath);
         return { success: true };
     } catch (e) {
         console.error('[manager] 启动 APP 异常:', appId, e.message);
@@ -788,7 +828,7 @@ app.on('window-all-closed', () => {
 }
 
 /**
- * 渲染 package.json 内容
+ * 渲染 package.json 内容（不含 canbox 平台配置，平台配置写入 .canbox-app）
  */
 function renderWebAppPackageJson(config) {
     const pkg = {
@@ -796,20 +836,7 @@ function renderWebAppPackageJson(config) {
         main: 'main.js',
         version: '1.0.0',
         displayName: config.name || 'Web App',
-        description: 'Web App: ' + config.url,
-        canbox: {
-            type: 'web',
-            webApp: {
-                url: config.url,
-                isPwa: !!config.isPwa,
-                manifestUrl: config.manifestUrl || '',
-                themeColor: config.themeColor || '',
-                backgroundColor: config.bgColor || '',
-                menuBar: config.menuBar !== false,
-                width: config.width || 1280,
-                height: config.height || 800
-            }
-        }
+        description: 'Web App: ' + config.url
     };
     return JSON.stringify(pkg, null, 4);
 }
@@ -843,6 +870,21 @@ async function createWebApp(config) {
             height: config.height
         });
         fs.writeFileSync(path.join(destPath, 'package.json'), pkgContent, 'utf-8');
+
+        // 写 .canbox-app（canbox 平台配置，与 package.json 分离）
+        // web app 使用当前 manager 的 electron 版本（builtin）
+        const electronRange = '^' + process.versions.electron;
+        const webAppConfig = {
+            url: config.url,
+            isPwa: !!config.isPwa,
+            manifestUrl: config.manifestUrl || '',
+            themeColor: config.themeColor || '',
+            backgroundColor: config.bgColor || '',
+            menuBar: config.menuBar !== false,
+            width: config.width || 1280,
+            height: config.height || 800
+        };
+        writeCanboxMeta(destPath, createWebMeta(electronRange, webAppConfig));
 
         // 写 main.js
         const mainJsContent = renderWebAppMainJs({
@@ -896,15 +938,16 @@ async function editWebApp(appId, config) {
         return { success: false, error: 'APP not found' };
     }
 
-    // 校验：仅网页 APP 可编辑
+    // 校验：仅网页 APP 可编辑（从 .canbox-app 读取 type）
     const pkgPath = path.join(destPath, 'package.json');
     if (!fs.existsSync(pkgPath)) {
         return { success: false, error: 'package.json not found' };
     }
-    const oldPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-    if (!oldPkg.canbox || oldPkg.canbox.type !== 'web') {
+    const oldMeta = readCanboxMeta(destPath);
+    if (!oldMeta || oldMeta.type !== 'web') {
         return { success: false, error: 'Only web app can be edited' };
     }
+    const oldPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
     try {
         // 覆盖写 package.json
@@ -921,6 +964,19 @@ async function editWebApp(appId, config) {
             height: config.height
         });
         fs.writeFileSync(pkgPath, pkgContent, 'utf-8');
+
+        // 覆盖写 .canbox-app（保留原 electron range）
+        const webAppConfig = {
+            url: config.url,
+            isPwa: !!config.isPwa,
+            manifestUrl: config.manifestUrl || '',
+            themeColor: config.themeColor || '',
+            backgroundColor: config.bgColor || '',
+            menuBar: config.menuBar !== false,
+            width: config.width || 1280,
+            height: config.height || 800
+        };
+        writeCanboxMeta(destPath, createWebMeta(oldMeta.electron.range, webAppConfig));
 
         // 覆盖写 main.js
         const mainJsContent = renderWebAppMainJs({
@@ -1415,6 +1471,232 @@ ipcMain.handle('manager.zoom.reset', async () => {
         }
     });
     return { success: true, factor: 1.0 };
+});
+
+// ====== Electron 版本管理 ======
+// 扫描 builtin（程序目录）和 downloaded（用户数据目录）的 electron 版本，
+// 支持在线下载白名单中的版本到 userData/runtime/
+
+const { ALLOWED_ELECTRON, scanBuiltinVersions, readDownloadedRegistry, getRegistryPath, getPlatformKey } =
+    require(path.join(CORE_PATH, 'lib', 'electron-selector'));
+
+// builtin electron 所在目录（CORE_PATH 的上级 = CANBOX_HOME）
+const CANBOX_HOME = path.dirname(CORE_PATH);
+// 用户下载 electron 的存放目录
+const RUNTIME_DIR = path.join(env.userData, 'runtime');
+
+// 下载进度回调表（taskId → onProgress），供 cancel 用
+const electronDownloadTasks = new Map();
+
+/**
+ * 递归解压 zip 到目标目录
+ */
+function extractZipToDir(zipPath, destDir) {
+    const zip = new AdmZip(zipPath);
+    zip.extractAllTo(destDir, true);
+}
+
+/**
+ * 下载文件到本地（支持进度回调、取消）
+ * @param {string} url 下载 URL
+ * @param {string} destPath 目标文件路径
+ * @param {(progress:number)=>void} onProgress 进度回调（0-100）
+ * @param {AbortController} controller 取消控制器
+ */
+async function downloadFileWithProgress(url, destPath, onProgress, controller) {
+    const axios = require('axios');
+    let res;
+    try {
+        res = await axios({
+            method: 'get',
+            url,
+            responseType: 'stream',
+            timeout: 60000,
+            signal: controller.signal,
+            headers: { 'User-Agent': 'Canbox-Manager/' + (require('./package.json').version || '0.0.0') }
+        });
+    } catch (e) {
+        // 区分错误类型，给出明确提示
+        if (controller.signal.aborted) {
+            throw new Error('下载已取消');
+        }
+        if (e.code === 'ECONNABORTED' || /timeout/i.test(e.message || '')) {
+            throw new Error(`连接超时：无法在 60 秒内建立到 ${url} 的连接，请检查网络后重试`);
+        }
+        if (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN') {
+            throw new Error(`域名解析失败：无法解析下载地址，请检查网络连接`);
+        }
+        if (e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET') {
+            throw new Error(`连接被拒绝或重置：${e.code}，请稍后重试`);
+        }
+        if (e.response) {
+            throw new Error(`服务器返回错误：HTTP ${e.response.status} ${e.response.statusText || ''}`);
+        }
+        throw new Error(`下载失败：${e.message || e.code || '未知错误'}`);
+    }
+    const total = parseInt(res.headers['content-length'] || '0', 10);
+    let received = 0;
+    const stream = require('stream');
+    const writer = fs.createWriteStream(destPath);
+    res.data.on('data', (chunk) => {
+        received += chunk.length;
+        if (onProgress && total > 0) {
+            onProgress(Math.floor((received / total) * 100));
+        }
+    });
+    try {
+        await new Promise((resolve, reject) => {
+            stream.pipeline(res.data, writer, (err) => err ? reject(err) : resolve());
+        });
+    } catch (e) {
+        if (controller.signal.aborted) {
+            throw new Error('下载已取消');
+        }
+        throw new Error(`下载写入失败：${e.message || e.code || '未知错误'}`);
+    }
+}
+
+// 列出白名单中所有允许的 electron 版本（含是否已安装状态）
+ipcMain.handle('manager.electron.listAllowed', async () => {
+    const builtin = scanBuiltinVersions(CANBOX_HOME);
+    const downloaded = readDownloadedRegistry(env.userData);
+    const installedVersions = new Set(builtin.map(v => v.version));
+    Object.values(downloaded.installedVersions || {}).forEach(v => {
+        if (v.electron) installedVersions.add(v.electron);
+    });
+    const platformKey = getPlatformKey();
+    const list = Object.keys(ALLOWED_ELECTRON).map(ver => ({
+        version: ver,
+        installed: installedVersions.has(ver),
+        source: builtin.find(v => v.version === ver) ? 'builtin' :
+                (downloaded.installedVersions && Object.values(downloaded.installedVersions).find(v => v.electron === ver) ? 'downloaded' : null),
+        supported: !!(ALLOWED_ELECTRON[ver].download && ALLOWED_ELECTRON[ver].download[platformKey])
+    }));
+    list.sort((a, b) => {
+        const va = a.version.split('.').map(Number);
+        const vb = b.version.split('.').map(Number);
+        for (let i = 0; i < 3; i++) {
+            if (va[i] !== vb[i]) return vb[i] - va[i];
+        }
+        return 0;
+    });
+    return { success: true, versions: list };
+});
+
+// 列出已下载的 electron 版本（仅 downloaded，不含 builtin）
+ipcMain.handle('manager.electron.listDownloaded', async () => {
+    const registry = readDownloadedRegistry(env.userData);
+    const list = Object.entries(registry.installedVersions || {}).map(([id, info]) => ({
+        id,
+        version: info.electron,
+        path: info.path,
+        installedAt: info.installedAt
+    }));
+    return { success: true, versions: list };
+});
+
+// 下载并安装指定 electron 版本
+ipcMain.handle('manager.electron.download', async (_e, version) => {
+    const entry = ALLOWED_ELECTRON[version];
+    if (!entry) return { success: false, error: `版本 ${version} 不在白名单中` };
+    const platformKey = getPlatformKey();
+    const url = entry.download && entry.download[platformKey];
+    if (!url) return { success: false, error: `版本 ${version} 不支持当前平台 ${platformKey}` };
+
+    // 目标目录：userData/runtime/electron-{version}/
+    const targetDir = path.join(RUNTIME_DIR, `electron-${version}`);
+    if (fs.existsSync(targetDir)) {
+        return { success: false, error: `版本 ${version} 已安装` };
+    }
+
+    const os = require('os');
+    const tmpZip = path.join(os.tmpdir(), `canbox-electron-${version}-${Date.now()}.zip`);
+    const controller = new AbortController();
+    const taskId = `ed_${Date.now()}`;
+    electronDownloadTasks.set(taskId, controller);
+
+    try {
+        // 1. 下载 zip
+        await downloadFileWithProgress(url, tmpZip, (progress) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('manager.electron.downloadProgress', { version, progress });
+            }
+        }, controller);
+        electronDownloadTasks.delete(taskId);
+
+        // 2. 解压到目标目录
+        const prevNoAsar = process.noAsar;
+        process.noAsar = true;
+        try {
+            fs.mkdirSync(targetDir, { recursive: true });
+            extractZipToDir(tmpZip, targetDir);
+        } catch (e) {
+            throw new Error(`解压失败：${e.message || e.code || '未知错误'}（下载文件可能已损坏，请重试）`);
+        } finally {
+            process.noAsar = prevNoAsar;
+        }
+
+        // 3. 给 electron 二进制加执行权限（非 Windows）
+        if (process.platform !== 'win32') {
+            const electronBin = path.join(targetDir, 'electron');
+            if (fs.existsSync(electronBin)) {
+                fs.chmodSync(electronBin, 0o755);
+            }
+        }
+
+        // 4. 写入注册表
+        const registryPath = getRegistryPath(env.userData);
+        fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+        const registry = readDownloadedRegistry(env.userData);
+        registry.installedVersions = registry.installedVersions || {};
+        registry.installedVersions[`electron-${version}`] = {
+            path: `electron-${version}`,
+            electron: version,
+            source: 'downloaded',
+            installedAt: Date.now()
+        };
+        fs.writeFileSync(registryPath, JSON.stringify(registry, null, 4), 'utf-8');
+
+        return { success: true, version, path: targetDir };
+    } catch (e) {
+        // 失败时清理半成品目录
+        try { if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true }); } catch (_) {}
+        return { success: false, error: e.message };
+    } finally {
+        try { if (fs.existsSync(tmpZip)) fs.unlinkSync(tmpZip); } catch (_) {}
+        electronDownloadTasks.delete(taskId);
+    }
+});
+
+// 取消下载
+ipcMain.handle('manager.electron.cancelDownload', async (_e, version) => {
+    for (const [taskId, controller] of electronDownloadTasks.entries()) {
+        controller.abort();
+        electronDownloadTasks.delete(taskId);
+    }
+    return { success: true };
+});
+
+// 删除已下载的 electron 版本（不允许删除 builtin）
+ipcMain.handle('manager.electron.delete', async (_e, version) => {
+    const registry = readDownloadedRegistry(env.userData);
+    const entries = Object.entries(registry.installedVersions || {});
+    const entry = entries.find(([id, info]) => info.electron === version);
+    if (!entry) {
+        return { success: false, error: `版本 ${version} 未安装或为 builtin，无法删除` };
+    }
+    const [id, info] = entry;
+    const targetDir = path.join(RUNTIME_DIR, info.path);
+    try {
+        if (fs.existsSync(targetDir)) {
+            fs.rmSync(targetDir, { recursive: true, force: true });
+        }
+        delete registry.installedVersions[id];
+        fs.writeFileSync(getRegistryPath(env.userData), JSON.stringify(registry, null, 4), 'utf-8');
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
 });
 
 // ====== 自动更新 ======

@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
 import { useAppsStore } from '@/stores/apps';
 import { useReposStore } from '@/stores/repos';
+import { useElectronStore } from '@/stores/electron';
 import notification from '@/utils/notification';
 import WebAppEditor from './WebAppEditor.vue';
 
@@ -68,6 +69,16 @@ function getPlatforms(app) {
 // APP 更新信息：{ [appId]: { repoId, currentVersion, newVersion } }
 const appUpdates = ref({});
 let offUpdatesAvailable = null;
+
+// 下载状态从全局 store 读取（跨页面共享，切换路由不丢失）
+const electronStore = useElectronStore();
+const downloadingElectron = computed(() => {
+    if (!electronStore.downloadingVersion) return null;
+    return {
+        version: electronStore.downloadingVersion,
+        progress: electronStore.downloadProgress
+    };
+});
 
 async function refreshUpdates() {
     try {
@@ -138,10 +149,56 @@ async function handleLaunch(app) {
     try {
         const result = await appsStore.launchApp(app.appId);
         if (!result.success) {
+            // 启动失败且需要下载 electron：弹引导对话框
+            if (result.needDownload) {
+                await promptDownloadElectron(app, result.version, result.url);
+                return;
+            }
             notification.error(result.error || t('apps.launchFailed'));
         }
     } catch (e) {
         notification.error(e.message || t('apps.launchFailed'));
+    }
+}
+
+// 缺失 electron 版本时弹对话框引导下载，下载完成后自动启动
+async function promptDownloadElectron(app, version, url) {
+    try {
+        await ElMessageBox.confirm(
+            t('apps.electronMissingPrompt', { version, name: app.name }),
+            t('apps.electronMissingTitle'),
+            {
+                confirmButtonText: t('apps.electronDownloadNow'),
+                cancelButtonText: t('apps.electronDownloadLater'),
+                type: 'warning'
+            }
+        );
+    } catch (e) {
+        // 用户取消
+        return;
+    }
+    // 通过全局 store 触发下载，进度跨页面共享
+    try {
+        const r = await electronStore.downloadElectron(version);
+        if (!r || !r.success) {
+            notification.error(
+                t('apps.electronDownloadFailedDetail', { version, error: (r && r.error) || t('apps.electronDownloadFailed') }),
+                t('apps.electronMissingTitle')
+            );
+            return;
+        }
+        notification.success(t('apps.electronDownloadDone'));
+        // 下载完成 → 自动重试启动
+        await appsStore.fetchApps();
+        const fresh = appsStore.apps.find((a) => a.appId === app.appId);
+        if (fresh) {
+            await handleLaunch(fresh);
+        }
+    } catch (e) {
+        notification.error(
+            t('apps.electronDownloadFailedDetail', { version, error: e.message || t('apps.electronDownloadFailed') }),
+            t('apps.electronMissingTitle')
+        );
     }
 }
 
@@ -364,6 +421,28 @@ async function installDeveloper() {
                                 {{ $t('apps.hasUpdate') }} v{{ appUpdates[app.appId].newVersion }}
                             </span>
                         </el-tooltip>
+                        <!-- electron 版本缺失徽标 -->
+                        <el-tooltip
+                            v-if="app.electronStatus && !app.electronStatus.ok && app.electronStatus.needDownload"
+                            :content="$t('apps.electronMissingTooltip', { version: app.electronStatus.version })"
+                            placement="top"
+                        >
+                            <span class="electron-missing-badge">
+                                {{ $t('apps.electronMissingBadge', { version: app.electronStatus.version }) }}
+                            </span>
+                        </el-tooltip>
+                        <!-- 下载进度条（store 中正在下载的版本等于该 APP 缺失的版本时显示） -->
+                        <span
+                            v-if="downloadingElectron && app.electronStatus && app.electronStatus.needDownload && downloadingElectron.version === app.electronStatus.version"
+                            class="downloading-electron"
+                        >
+                            <el-progress
+                                :percentage="downloadingElectron.progress"
+                                :stroke-width="6"
+                                :show-text="false"
+                                style="width: 80px;"
+                            />
+                        </span>
                         <!-- 平台图标靠右，无 platforms 则默认全平台 -->
                         <span class="platforms">
                             <el-tooltip
@@ -614,6 +693,23 @@ async function installDeveloper() {
 }
 .update-badge:hover {
     background: var(--el-color-warning-light-7);
+}
+/* electron 版本缺失徽标 */
+.electron-missing-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: var(--el-color-danger-light-9);
+    color: var(--el-color-danger-dark-2);
+    border: 1px solid var(--el-color-danger-light-5);
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+.downloading-electron {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 4px;
 }
 .platforms {
     margin-left: auto;

@@ -65,7 +65,7 @@ Section "Canbox" SecMain
     WriteRegStr HKLM "Software\Canbox" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "DisplayName" "Canbox"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "DisplayIcon" "$\"$INSTDIR\electron\electron.exe$\""
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "DisplayIcon" "$\"$INSTDIR\manager\icons\256.png$\""
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "DisplayVersion" "0.1.0"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "Publisher" "lizl6"
 

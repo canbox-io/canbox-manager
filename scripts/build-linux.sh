@@ -26,14 +26,19 @@ echo "[2/5] 组装目录结构..."
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR/canbox"
 
-# 2a. 复制 electron 运行时
+# 2a. 复制 electron 运行时（目录名带版本号，如 electron-42.5.1/）
 ELECTRON_DIST="node_modules/electron/dist"
 if [ ! -d "$ELECTRON_DIST" ]; then
     echo "错误: electron 运行时不存在，请先 npm install" >&2
     exit 1
 fi
-cp -r "$ELECTRON_DIST" "$STAGE_DIR/canbox/electron"
-echo "  electron: $(ls "$STAGE_DIR/canbox/electron/electron")"
+ELECTRON_VERSION=$(cat "$ELECTRON_DIST/version" 2>/dev/null || echo "")
+if [ -z "$ELECTRON_VERSION" ]; then
+    echo "错误: 无法读取 electron 版本号（$ELECTRON_DIST/version 不存在）" >&2
+    exit 1
+fi
+cp -r "$ELECTRON_DIST" "$STAGE_DIR/canbox/electron-$ELECTRON_VERSION"
+echo "  electron: $ELECTRON_VERSION → electron-$ELECTRON_VERSION/"
 
 # 2b. 复制 canbox-core
 CORE_SRC="../canbox-core"

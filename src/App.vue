@@ -2,27 +2,36 @@
 import { useRouter, useRoute } from 'vue-router';
 import { computed, onMounted, ref } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
+import { useElectronStore } from '@/stores/electron';
 
 const router = useRouter();
 const route = useRoute();
 const settingsStore = useSettingsStore();
+const electronStore = useElectronStore();
 const sidebarExpanded = ref(false);
 
 const navItems = [
     { path: '/', emoji: '⊞', label: 'nav.apps' },
     { path: '/repos', emoji: '📁', label: 'nav.repos' },
     { path: '/settings', emoji: '⚙', label: 'nav.settings' },
+    { path: '/electron-versions', emoji: '⚡', label: 'nav.electron' },
     { path: '/about', emoji: 'ℹ', label: 'nav.about' }
 ];
 
 const activeNav = computed(() => route.path);
 const sidebarWidth = computed(() => sidebarExpanded.value ? '172px' : '64px');
 
+// 全局下载状态徽标（任意页面下载中都在侧边栏显示进度）
+const isDownloading = computed(() => !!electronStore.downloadingVersion);
+const downloadPercent = computed(() => electronStore.downloadProgress);
+
 function navigate(item) {
     router.push(item.path);
 }
 
 onMounted(() => {
+    // 全局订阅下载进度事件（应用生命周期内只订阅一次）
+    electronStore.subscribe();
     window.api?.manager?.appReady?.();
 });
 </script>
@@ -44,6 +53,20 @@ onMounted(() => {
                 >
                     <span class="sidebar-emoji">{{ item.emoji }}</span>
                     <span v-show="sidebarExpanded" class="nav-label">{{ $t(item.label) }}</span>
+                    <!-- 下载进度徽标（仅在 electron-versions 入口显示） -->
+                    <span
+                        v-if="isDownloading && item.path === '/electron-versions'"
+                        class="nav-download-badge"
+                        :title="`下载中 ${downloadPercent}%`"
+                    >
+                        <el-progress
+                            type="circle"
+                            :percentage="downloadPercent"
+                            :width="18"
+                            :stroke-width="3"
+                            :show-text="false"
+                        />
+                    </span>
                 </div>
             </nav>
             <div class="sidebar-footer">
@@ -139,6 +162,19 @@ onMounted(() => {
 .nav-item:hover {
     background-color: var(--el-fill-color-light);
     color: var(--el-text-color-primary);
+}
+
+/* 下载进度徽标 */
+.nav-download-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.nav-item {
+    position: relative;
 }
 
 .nav-item.active {

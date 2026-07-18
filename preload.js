@@ -113,6 +113,18 @@ const api = {
             return () => ipcRenderer.removeListener('manager.update.downloadProgress', handler);
         },
 
+        // Electron 版本管理
+        electronListAllowed: () => ipcRenderer.invoke('manager.electron.listAllowed'),
+        electronListDownloaded: () => ipcRenderer.invoke('manager.electron.listDownloaded'),
+        electronDownload: (version) => ipcRenderer.invoke('manager.electron.download', version),
+        electronCancelDownload: (version) => ipcRenderer.invoke('manager.electron.cancelDownload', version),
+        electronDelete: (version) => ipcRenderer.invoke('manager.electron.delete', version),
+        onElectronDownloadProgress: (callback) => {
+            const handler = (_e, data) => callback(data);
+            ipcRenderer.on('manager.electron.downloadProgress', handler);
+            return () => ipcRenderer.removeListener('manager.electron.downloadProgress', handler);
+        },
+
         // 原生能力（APP 自有，非 canbox-core 提供）
         showOpenDialog: (options) => ipcRenderer.invoke('manager.dialog.showOpenDialog', options),
         openUrl: (url) => ipcRenderer.invoke('manager.shell.openUrl', url),

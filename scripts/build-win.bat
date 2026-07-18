@@ -27,14 +27,22 @@ echo [2/5] 组装目录结构...
 if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
 mkdir "%STAGE_DIR%\canbox"
 
-REM 2a. 复制 electron 运行时
+REM 2a. 复制 electron 运行时（目录名带版本号，如 electron-42.5.1\）
 set ELECTRON_DIST=node_modules\electron\dist
 if not exist "%ELECTRON_DIST%\electron.exe" (
     echo 错误: electron 运行时不存在，请先 npm install >&2
     exit /b 1
 )
-xcopy /e /i /q "%ELECTRON_DIST%" "%STAGE_DIR%\canbox\electron" >nul
-echo   electron: 已复制
+set ELECTRON_VERSION=
+if exist "%ELECTRON_DIST%\version" (
+    set /p ELECTRON_VERSION=<"%ELECTRON_DIST%\version"
+)
+if "!ELECTRON_VERSION!"=="" (
+    echo 错误: 无法读取 electron 版本号（%ELECTRON_DIST%\version 不存在） >&2
+    exit /b 1
+)
+xcopy /e /i /q "%ELECTRON_DIST%" "%STAGE_DIR%\canbox\electron-!ELECTRON_VERSION!" >nul
+echo   electron: !ELECTRON_VERSION! -^> electron-!ELECTRON_VERSION!\
 
 REM 2b. 复制 canbox-core
 set CORE_SRC=..\canbox-core

@@ -1,12 +1,14 @@
 {
     "app": {
-        "name": "Canbox Manager"
+        "name": "Canbox Manager",
+        "version": "0.1.0"
     },
     "nav": {
         "apps": "我的应用",
         "repos": "应用仓库",
         "settings": "设置",
-        "about": "关于"
+        "about": "关于",
+        "electron": "Electron 版本"
     },
     "apps": {
         "title": "我的应用",
@@ -21,6 +23,15 @@
         "removeSuccess": "应用已删除",
         "launch": "启动",
         "launchFailed": "启动失败",
+        "electronMissingTitle": "需要下载 Electron",
+        "electronMissingPrompt": "「{name}」需要 Electron v{version}，本地尚未安装。是否立即下载？",
+        "electronDownloadNow": "立即下载",
+        "electronDownloadLater": "稍后",
+        "electronDownloadFailed": "Electron 下载失败",
+        "electronDownloadFailedDetail": "Electron v{version} 下载失败：{error}",
+        "electronDownloadDone": "Electron 下载完成，正在启动应用",
+        "electronMissingTooltip": "缺少此 APP 声明的 Electron v{version}，点击启动会提示下载",
+        "electronMissingBadge": "需 Electron v{version}",
         "clearData": "清理数据",
         "clearDataConfirm": "确定要清理此应用的数据吗？",
         "clearDataSuccess": "数据已清理",

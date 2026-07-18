@@ -86,20 +86,36 @@ runPrivileged() {
 }
 
 # 安装文件到目标目录（处理提权）
+# 程序目录直接覆盖：先清理旧 builtin electron-* 目录，再复制新文件
 installFiles() {
     local target_dir="$1"
+    # 清理旧的 builtin electron 目录（electron-*），避免版本残留
+    # 用户下载的 electron 在 userData/runtime/，不受影响
+    if [ -d "$target_dir" ]; then
+        rm -rf "$target_dir"/electron-* 2>/dev/null || true
+    fi
     if needPrivilege "$target_dir"; then
         echo "[canbox] 安装到系统目录需要管理员权限"
         echo "[canbox] 路径: $target_dir"
         runPrivileged mkdir -p "$target_dir"
         runPrivileged cp -r "$INSTALL_TMPDIR/canbox/"* "$target_dir/"
         runPrivileged chmod +x "$target_dir/bin/canbox"
-        runPrivileged chmod +x "$target_dir/electron/electron" 2>/dev/null || true
+        # 给 builtin electron 二进制加执行权限（扫描 electron-* 目录）
+        for e_dir in "$target_dir"/electron-*/; do
+            if [ -f "${e_dir}electron" ]; then
+                runPrivileged chmod +x "${e_dir}electron" 2>/dev/null || true
+            fi
+        done
     else
         mkdir -p "$target_dir"
         cp -r "$INSTALL_TMPDIR/canbox/"* "$target_dir/"
         chmod +x "$target_dir/bin/canbox"
-        chmod +x "$target_dir/electron/electron" 2>/dev/null || true
+        # 给 builtin electron 二进制加执行权限（扫描 electron-* 目录）
+        for e_dir in "$target_dir"/electron-*/; do
+            if [ -f "${e_dir}electron" ]; then
+                chmod +x "${e_dir}electron" 2>/dev/null || true
+            fi
+        done
     fi
 }
 

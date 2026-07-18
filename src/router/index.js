@@ -17,6 +17,11 @@ const routes = [
         component: () => import('@/views/SettingsView.vue')
     },
     {
+        path: '/electron-versions',
+        name: 'ElectronVersions',
+        component: () => import('@/views/ElectronVersionsView.vue')
+    },
+    {
         path: '/about',
         name: 'About',
         component: () => import('@/views/AboutView.vue')

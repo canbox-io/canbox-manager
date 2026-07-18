@@ -11,14 +11,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 CANBOX_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-ELECTRON="$CANBOX_HOME/electron/electron"
 CORE="$CANBOX_HOME/canbox-core/injection.js"
-
-# 检查 electron 二进制是否存在
-if [ ! -f "$ELECTRON" ]; then
-    echo "[canbox] 错误: 找不到 electron 二进制: $ELECTRON" >&2
-    exit 1
-fi
+SELECTOR="$CANBOX_HOME/canbox-core/lib/electron-selector.js"
 
 # 检查 injection.js 是否存在
 if [ ! -f "$CORE" ]; then
@@ -44,8 +38,47 @@ if [ -z "$USERS_PATH" ]; then
     USERS_PATH="$USER_DATA/Users"
 fi
 
+# 扫描程序目录中的 builtin electron（electron-{ver}/electron）
+findBuiltinElectron() {
+    local dir
+    for dir in "$CANBOX_HOME"/electron-*/; do
+        if [ -f "$dir/electron" ]; then
+            echo "${dir}electron"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 通过 selector 选择 APP 的 electron 版本
+# 返回 electron 路径（stdout），或报错退出
+resolveAppElectron() {
+    local app_dir="$1"
+    local result exit_code
+    result=$(node "$SELECTOR" \
+        --app-dir "$app_dir" \
+        --canbox-home "$CANBOX_HOME" \
+        --user-data "$USER_DATA" 2>&1)
+    exit_code=$?
+    if [ $exit_code -eq 0 ]; then
+        echo "$result"
+        return 0
+    elif [ $exit_code -eq 2 ]; then
+        echo "[canbox] 需要下载 electron: $result" >&2
+        exit 1
+    else
+        echo "[canbox] 错误: $result" >&2
+        exit 1
+    fi
+}
+
 case "${1:-}" in
     manager)
+        # manager 用 builtin electron（程序自带）
+        ELECTRON=$(findBuiltinElectron) || {
+            echo "[canbox] 错误: 找不到 builtin electron（$CANBOX_HOME/electron-*/electron）" >&2
+            exit 1
+        }
         exec "$ELECTRON" -r "$CORE" "$CANBOX_HOME/manager/" --app-id=canbox-manager --no-sandbox
         ;;
     app)
@@ -64,14 +97,20 @@ case "${1:-}" in
             echo "[canbox] 错误: APP 不存在: $APP_ID (路径: $APP_DIR)" >&2
             exit 1
         fi
-        # 判断是否为网页应用（canbox.type === 'web'）
+
+        # 通过 selector 选择 electron 版本
+        ELECTRON=$(resolveAppElectron "$APP_DIR")
+
+        # 从 .canbox-app 判断是否为网页应用（type === 'web'）
         # 网页应用不注入 canbox-core，使用独立 userData，避免共享 profile 污染和初始化延迟
         IS_WEB_APP=0
-        if [ -f "$APP_DIR/package.json" ]; then
-            if grep -q '"type"[[:space:]]*:[[:space:]]*"web"' "$APP_DIR/package.json" 2>/dev/null; then
+        CANBOX_APP_FILE="$APP_DIR/.canbox-app"
+        if [ -f "$CANBOX_APP_FILE" ]; then
+            if grep -q '"type"[[:space:]]*:[[:space:]]*"web"' "$CANBOX_APP_FILE" 2>/dev/null; then
                 IS_WEB_APP=1
             fi
         fi
+
         if [ "$IS_WEB_APP" = "1" ]; then
             exec "$ELECTRON" "$APP_TARGET" --no-sandbox
         else

@@ -209,6 +209,7 @@ async function handleSubmit() {
                         v-model="form.url"
                         placeholder="https://example.com"
                         @blur="handleUrlBlur"
+                        @keyup.enter="handleFetchManifest"
                     />
                     <el-button :loading="fetching" @click="handleFetchManifest">
                         {{ $t('webApp.fetch') }}
