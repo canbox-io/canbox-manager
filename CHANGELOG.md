@@ -4,6 +4,28 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.1.6] - 2026-07-18
+
+### feat | 新功能 / Features
+
+新增 Electron 版本管理功能，支持多版本下载与切换
+优化 Electron 运行时下载交互与 launcher 生命周期管理，缺运行时的 APP 不生成 launcher
+Electron 版本管理界面完成国际化（中英双语）
+持久化窗口状态，重启后恢复窗口位置和大小
+
+Add Electron version management with multi-version download and switching
+Improve Electron runtime download UX and launcher lifecycle: skip launcher generation when runtime missing
+Localize Electron versions management UI (Chinese/English)
+Persist window state across sessions, restore position and size on restart
+
+### fix | 问题修复 / Bug Fixes
+
+修复下载完成后版本表格状态未即时更新的问题
+修复应用 logo 读取回退及编辑后旧启动器残留问题
+
+Fix version table status not updating immediately after download
+Fix app logo fallback read and stale launcher residue after editing
+
 ## [0.1.5] - 2026-07-16
 
 ### feat | 新功能 / Features
