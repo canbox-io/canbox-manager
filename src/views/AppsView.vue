@@ -177,9 +177,20 @@ async function promptDownloadElectron(app, version, url) {
         // 用户取消
         return;
     }
-    // 通过全局 store 触发下载，进度跨页面共享
+    await startElectronDownloadAndNavigate(app, version);
+}
+
+// 触发 electron 下载并跳转到 electron 版本管理页面查看进度
+// 下载完成后自动刷新 APP 列表并重试启动（若来源 APP 已知）
+async function startElectronDownloadAndNavigate(app, version) {
     try {
-        const r = await electronStore.downloadElectron(version);
+        // 不 await，让跳转先发生，下载在后台进行
+        const downloadPromise = electronStore.downloadElectron(version);
+        // 提示用户并跳转到 electron 版本管理页面查看进度
+        notification.info(t('apps.electronDownloadingHint', { version }));
+        router.push('/electron-versions');
+
+        const r = await downloadPromise;
         if (!r || !r.success) {
             notification.error(
                 t('apps.electronDownloadFailedDetail', { version, error: (r && r.error) || t('apps.electronDownloadFailed') }),
@@ -200,6 +211,25 @@ async function promptDownloadElectron(app, version, url) {
             t('apps.electronMissingTitle')
         );
     }
+}
+
+// 是否需要展示"下载 Electron"按钮（native APP 且缺 electron 运行时）
+function needDownloadElectron(app) {
+    return app.type !== 'web' && app.electronStatus && !app.electronStatus.ok && app.electronStatus.needDownload;
+}
+
+// 当前 APP 是否正在下载其所需的 electron 运行时
+function isDownloadingForApp(app) {
+    return !!downloadingElectron.value
+        && app.electronStatus
+        && app.electronStatus.needDownload
+        && downloadingElectron.value.version === app.electronStatus.version;
+}
+
+// 从 APP 卡片直接触发 electron 下载（不弹确认框，跳转到 electron 页面查看进度）
+async function handleDownloadElectronForApp(app) {
+    if (!app.electronStatus || !app.electronStatus.needDownload) return;
+    await startElectronDownloadAndNavigate(app, app.electronStatus.version);
 }
 
 async function handleRemove(app) {
@@ -386,7 +416,7 @@ async function installDeveloper() {
         </div>
 
         <div v-else class="app-list">
-            <div v-for="app in appsStore.apps" :key="app.appId" class="app-card">
+            <div v-for="app in appsStore.apps" :key="app.appId" class="app-card" :class="{ 'app-card-missing-electron': needDownloadElectron(app) }">
                 <!-- Logo -->
                 <div class="logo-section">
                     <img v-if="app.logo" :src="app.logo" :alt="app.name" />
@@ -465,7 +495,25 @@ async function installDeveloper() {
 
                     <!-- 底部操作按钮 -->
                     <div class="app-actions">
-                        <el-tooltip :content="$t('apps.launch')" placement="top">
+                        <!-- 缺 electron 运行时：显示下载按钮（下载中显示进度，禁用点击） -->
+                        <el-tooltip
+                            v-if="needDownloadElectron(app)"
+                            :content="isDownloadingForApp(app)
+                                ? $t('apps.electronDownloadingTooltip', { version: app.electronStatus.version })
+                                : $t('apps.downloadElectronTooltip', { version: app.electronStatus.version })"
+                            placement="top"
+                        >
+                            <button
+                                class="icon-btn download-electron-btn"
+                                :disabled="isDownloadingForApp(app)"
+                                @click="handleDownloadElectronForApp(app)"
+                            >
+                                <span v-if="isDownloadingForApp(app)" class="mini-spinner"></span>
+                                <span v-else>⬇️</span>
+                            </button>
+                        </el-tooltip>
+                        <!-- 有可运行 electron：显示运行按钮 -->
+                        <el-tooltip v-else :content="$t('apps.launch')" placement="top">
                             <button class="icon-btn run-btn" @click="handleLaunch(app)">▶️</button>
                         </el-tooltip>
                         <!-- 仅网页/PWA APP 显示编辑按钮 -->
@@ -611,6 +659,10 @@ async function installDeveloper() {
 }
 .app-card:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+/* 缺 electron 运行时的 APP 卡片：左侧橙色边框提示 */
+.app-card-missing-electron {
+    border-left: 3px solid var(--el-color-warning);
 }
 
 /* Logo */
@@ -791,6 +843,26 @@ async function installDeveloper() {
     transform: translateY(0);
 }
 .run-btn:hover { background: var(--el-color-success-light-9); }
+.download-electron-btn:hover { background: var(--el-color-warning-light-9); }
+.download-electron-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+    transform: none;
+    box-shadow: none;
+}
+/* 小型旋转 spinner（下载按钮内） */
+.mini-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--el-color-warning-light-5);
+    border-top-color: var(--el-color-warning);
+    border-radius: 50%;
+    animation: mini-spin 0.8s linear infinite;
+}
+@keyframes mini-spin {
+    to { transform: rotate(360deg); }
+}
 .edit-btn:hover { background: var(--el-color-primary-light-9); }
 .update-btn { animation: update-pulse 2s ease-in-out infinite; }
 .update-btn:hover { background: var(--el-color-warning-light-9); }

@@ -184,10 +184,10 @@ ipcMain.handle('manager.apps.list', async () => {
 
 ipcMain.handle('manager.apps.import', async (_e, zipPath) => {
     const result = await importAppFromZip(zipPath);
-    // 生产模式下写 launcher
+    // 生产模式下写 launcher（缺 electron 运行时则跳过，待 electron 下载完成后补生成）
     if (result.success) {
         const appInfo = readAppInfo(result.appId);
-        if (appInfo) appLauncher.generateLauncher(appInfo);
+        if (appInfo && !shouldSkipLauncherForApp(result.appId)) appLauncher.generateLauncher(appInfo);
     }
     return result;
 });
@@ -303,6 +303,95 @@ function readAppInfo(appId) {
         };
     } catch (e) {
         return null;
+    }
+}
+
+/**
+ * 判断 APP 是否因缺少 electron 运行时而应跳过 launcher 生成。
+ * - web 类型 APP 不需要 electron，返回 false
+ * - native 类型 APP 若声明了 electron.range 且本地无可用版本（needDownload 或 error），返回 true
+ * - 其他情况（builtin 可用、已下载可用、未声明 range）返回 false
+ */
+function shouldSkipLauncherForApp(appId) {
+    try {
+        const appDir = path.join(USERS_PATH, 'apps', appId);
+        if (!fs.existsSync(appDir)) return false;
+        const meta = readCanboxMeta(appDir);
+        const metaType = (meta && meta.type) || 'native';
+        if (metaType === 'web') return false;
+        if (!meta || !meta.electron || !meta.electron.range) return false;
+        const canboxHome = path.dirname(CORE_PATH);
+        const probe = resolveElectron(appDir, canboxHome, env.userData);
+        // needDownload=true 或 error 都视为不可运行
+        return !!(probe.needDownload || probe.error);
+    } catch (e) {
+        // 出错时不跳过，保守生成
+        return false;
+    }
+}
+
+/**
+ * 遍历所有已安装 APP，为依赖指定 electron 版本且当前可运行但尚无 launcher 的 APP 补生成 launcher。
+ * 用于 electron 下载完成后，恢复之前因缺 electron 而跳过的 launcher。
+ */
+function regenerateLaunchersForElectronVersion(version) {
+    const appsDir = path.join(USERS_PATH, 'apps');
+    if (!fs.existsSync(appsDir)) return;
+    const canboxHome = path.dirname(CORE_PATH);
+    const entries = fs.readdirSync(appsDir, { withFileTypes: true });
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const appId = entry.name;
+        const appDir = path.join(appsDir, appId);
+        try {
+            const meta = readCanboxMeta(appDir);
+            const metaType = (meta && meta.type) || 'native';
+            if (metaType === 'web') continue;
+            if (!meta || !meta.electron || !meta.electron.range) continue;
+            const probe = resolveElectron(appDir, canboxHome, env.userData);
+            // 只处理选中版本等于刚下载版本、且不再 needDownload/error 的 APP
+            if (probe.needDownload || probe.error) continue;
+            if (probe.version !== version) continue;
+            const appInfo = readAppInfo(appId);
+            if (!appInfo) continue;
+            // 无论 launcher 是否已存在，都 force 生成一次（确保存在）
+            appLauncher.generateLauncher(appInfo, { force: true });
+            console.log('[manager] electron 下载完成，补生成 launcher:', appId);
+        } catch (e) {
+            console.warn('[manager] 补生成 launcher 异常:', appId, e.message);
+        }
+    }
+}
+
+/**
+ * 遍历所有已安装 APP，为依赖指定 electron 版本的 APP 删除 launcher。
+ * 用于 electron 版本被删除时，清理对应 APP 的快捷方式（使其不可从菜单启动）。
+ * builtin 版本不处理（builtin 不可删除）。
+ */
+function removeLaunchersForElectronVersion(version) {
+    const appsDir = path.join(USERS_PATH, 'apps');
+    if (!fs.existsSync(appsDir)) return;
+    const canboxHome = path.dirname(CORE_PATH);
+    const entries = fs.readdirSync(appsDir, { withFileTypes: true });
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const appId = entry.name;
+        const appDir = path.join(appsDir, appId);
+        try {
+            const meta = readCanboxMeta(appDir);
+            const metaType = (meta && meta.type) || 'native';
+            if (metaType === 'web') continue;
+            if (!meta || !meta.electron || !meta.electron.range) continue;
+            const probe = resolveElectron(appDir, canboxHome, env.userData);
+            // 只处理原本选中该 version、删除后变为 needDownload/error 的 APP
+            if (probe.version !== version) continue;
+            const appInfo = readAppInfo(appId);
+            if (!appInfo) continue;
+            appLauncher.deleteLauncher(appInfo.name);
+            console.log('[manager] electron 版本删除，清理 launcher:', appId);
+        } catch (e) {
+            console.warn('[manager] 清理 launcher 异常:', appId, e.message);
+        }
     }
 }
 
@@ -1246,9 +1335,9 @@ ipcMain.handle('manager.repos.install', async (_e, repoId) => {
         repos[repoId] = repo;
         saveAllRepos(repos);
 
-        // 生产模式下写 launcher
+        // 生产模式下写 launcher（缺 electron 运行时则跳过，待 electron 下载完成后补生成）
         const appInfo = readAppInfo(importResult.appId);
-        if (appInfo) appLauncher.generateLauncher(appInfo);
+        if (appInfo && !shouldSkipLauncherForApp(importResult.appId)) appLauncher.generateLauncher(appInfo);
 
         return { success: true, appId: importResult.appId };
     } catch (e) {
@@ -1624,6 +1713,12 @@ ipcMain.handle('manager.electron.download', async (_e, version) => {
         }, controller);
         electronDownloadTasks.delete(taskId);
 
+        // zip 下载完成，进入解压安装阶段：通知前端 progress=100，
+        // 前端据此切换为"解压安装中…"提示（installing 状态）
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('manager.electron.downloadProgress', { version, progress: 100 });
+        }
+
         // 2. 解压到目标目录
         const prevNoAsar = process.noAsar;
         process.noAsar = true;
@@ -1657,6 +1752,13 @@ ipcMain.handle('manager.electron.download', async (_e, version) => {
         };
         fs.writeFileSync(registryPath, JSON.stringify(registry, null, 4), 'utf-8');
 
+        // 下载完成后：为依赖此 electron 版本且尚未生成 launcher 的 APP 补生成 launcher
+        try {
+            regenerateLaunchersForElectronVersion(version);
+        } catch (e) {
+            console.warn('[manager] 补生成 launcher 失败:', e.message);
+        }
+
         return { success: true, version, path: targetDir };
     } catch (e) {
         // 失败时清理半成品目录
@@ -1688,6 +1790,12 @@ ipcMain.handle('manager.electron.delete', async (_e, version) => {
     const [id, info] = entry;
     const targetDir = path.join(RUNTIME_DIR, info.path);
     try {
+        // 删除 electron 目录前：先清理依赖此版本的 APP launcher（此时 resolveElectron 仍能选中该版本）
+        try {
+            removeLaunchersForElectronVersion(version);
+        } catch (e) {
+            console.warn('[manager] 删除 electron 前清理 launcher 失败:', e.message);
+        }
         if (fs.existsSync(targetDir)) {
             fs.rmSync(targetDir, { recursive: true, force: true });
         }

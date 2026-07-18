@@ -3,8 +3,10 @@ import { ref, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import notification from '@/utils/notification';
 import { useElectronStore } from '@/stores/electron';
+import { useAppsStore } from '@/stores/apps';
 
 const electronStore = useElectronStore();
+const appsStore = useAppsStore();
 
 const loading = ref(false);
 const versions = ref([]);
@@ -12,8 +14,28 @@ const versions = ref([]);
 // 下载状态从全局 store 读取（跨页面共享，切换路由不丢失）
 const downloadingVersion = computed(() => electronStore.downloadingVersion);
 const downloadProgress = computed(() => electronStore.downloadProgress);
+// 安装中（zip 下载完成后的解压/写注册表阶段），progress 卡在 100 但未完成
+const installing = computed(() => downloadingVersion.value && downloadProgress.value >= 100);
+
+/**
+ * 构造下载中版本的占位行。
+ * 用于从其他页面跳转过来时，loadVersions 未返回前先渲染进度条。
+ * 真实数据加载后会被替换。
+ */
+function makePlaceholderRow(version) {
+    return {
+        version,
+        installed: false,
+        source: null,
+        supported: true
+    };
+}
 
 const loadVersions = async () => {
+    // 若进入页面时已有下载任务进行中，先放占位行，确保进度条立即可见
+    if (downloadingVersion.value && !versions.value.some(v => v.version === downloadingVersion.value)) {
+        versions.value = [makePlaceholderRow(downloadingVersion.value)];
+    }
     loading.value = true;
     try {
         const res = await window.api.manager.electronListAllowed();
@@ -46,6 +68,9 @@ const handleDownload = async (version) => {
         if (res.success) {
             notification.success(`Electron ${version} 下载安装成功`);
             await loadVersions();
+            // 刷新 APP 列表：依赖该版本的 APP 现在可运行了（electronStatus 更新）
+            // 主进程侧已补生成 launcher，这里同步前端状态
+            await appsStore.fetchApps();
         } else {
             notification.error(`Electron ${version} 下载失败：${res.error}`, '下载失败');
         }
@@ -78,6 +103,9 @@ const handleDelete = async (version) => {
         if (res.success) {
             notification.success(`已删除 Electron ${version}`);
             await loadVersions();
+            // 刷新 APP 列表：依赖该版本的 APP 现在缺运行时了（electronStatus 更新）
+            // 主进程侧已清理 launcher，这里同步前端状态
+            await appsStore.fetchApps();
         } else {
             notification.error('删除失败: ' + res.error);
         }
@@ -98,6 +126,38 @@ const sourceType = (source) => {
     return 'info';
 };
 
+// 下载中行的状态标签：覆盖 sourceLabel/sourceType
+function rowStatusLabel(row) {
+    if (downloadingVersion.value === row.version) {
+        if (installing.value) return '解压中';
+        return `下载中 ${downloadProgress.value || 0}%`;
+    }
+    return sourceLabel(row.source);
+}
+
+function rowStatusType(row) {
+    if (downloadingVersion.value === row.version) {
+        return 'warning';
+    }
+    return sourceType(row.source);
+}
+
+// 为下载中的行附加 class，用于在行底部渲染进度条
+function tableRowClassName({ row }) {
+    if (downloadingVersion.value === row.version) {
+        return 'row-downloading';
+    }
+    return '';
+}
+
+// 行样式：通过 CSS 变量传递进度百分比，供 ::after 伪元素读取
+function tableRowStyle({ row }) {
+    if (downloadingVersion.value === row.version && !installing.value) {
+        return { '--download-progress': `${downloadProgress.value || 0}%` };
+    }
+    return {};
+}
+
 onMounted(() => {
     loadVersions();
 });
@@ -117,16 +177,21 @@ onMounted(() => {
         </div>
 
         <el-card v-loading="loading" shadow="never">
-            <el-table :data="versions" style="width: 100%">
+            <el-table
+                :data="versions"
+                style="width: 100%"
+                :row-class-name="tableRowClassName"
+                :row-style="tableRowStyle"
+            >
                 <el-table-column label="版本号" prop="version" width="140">
                     <template #default="{ row }">
                         <span class="version-cell">Electron {{ row.version }}</span>
                     </template>
                 </el-table-column>
-                <el-table-column label="状态" width="120">
+                <el-table-column label="状态" min-width="140">
                     <template #default="{ row }">
-                        <el-tag :type="sourceType(row.source)" size="small">
-                            {{ sourceLabel(row.source) }}
+                        <el-tag :type="rowStatusType(row)" size="small" :class="{ 'status-downloading': downloadingVersion === row.version }">
+                            {{ rowStatusLabel(row) }}
                         </el-tag>
                     </template>
                 </el-table-column>
@@ -135,19 +200,6 @@ onMounted(() => {
                         <el-tag :type="row.supported ? 'success' : 'danger'" size="small" effect="plain">
                             {{ row.supported ? '当前平台' : '不支持' }}
                         </el-tag>
-                    </template>
-                </el-table-column>
-                <el-table-column label="下载进度">
-                    <template #default="{ row }">
-                        <el-progress
-                            v-if="downloadingVersion === row.version"
-                            :percentage="downloadProgress || 0"
-                            :stroke-width="10"
-                            status="success"
-                        />
-                        <span v-else-if="row.source === 'builtin'" class="hint-text">安装包内置，无需下载</span>
-                        <span v-else-if="row.source === 'downloaded'" class="hint-text">已就绪</span>
-                        <span v-else class="hint-text">未安装</span>
                     </template>
                 </el-table-column>
                 <el-table-column label="操作" width="220" align="right">
@@ -235,6 +287,37 @@ onMounted(() => {
 .hint-text {
     color: var(--el-text-color-placeholder);
     font-size: 13px;
+}
+
+.installing-text {
+    color: var(--el-color-primary);
+    font-weight: 500;
+}
+
+/* 下载中行的状态标签轻微脉冲，提示进行中 */
+.status-downloading {
+    animation: status-pulse 1.5s ease-in-out infinite;
+}
+@keyframes status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* 下载中行：底部贴一条进度条（通过 CSS 变量 --download-progress 驱动宽度） */
+:deep(.el-table__row.row-downloading) {
+    position: relative;
+}
+:deep(.el-table__row.row-downloading)::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: var(--download-progress, 0%);
+    background: var(--el-color-primary);
+    transition: width 0.3s ease;
+    z-index: 1;
+    pointer-events: none;
 }
 
 .info-section {
