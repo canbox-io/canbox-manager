@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 import notification from '@/utils/notification';
 import { useElectronStore } from '@/stores/electron';
 import { useAppsStore } from '@/stores/apps';
 
+const { t } = useI18n();
 const electronStore = useElectronStore();
 const appsStore = useAppsStore();
 
@@ -42,10 +44,10 @@ const loadVersions = async () => {
         if (res.success) {
             versions.value = res.versions;
         } else {
-            notification.error('加载 Electron 版本失败');
+            notification.error(t('electronVersions.loadFailed'));
         }
     } catch (e) {
-        notification.error('加载版本列表失败: ' + e.message);
+        notification.error(t('electronVersions.loadFailedDetail', { error: e.message }));
     } finally {
         loading.value = false;
     }
@@ -56,9 +58,9 @@ const builtinVersion = computed(() => versions.value.find(v => v.source === 'bui
 const handleDownload = async (version) => {
     try {
         await ElMessageBox.confirm(
-            `将下载 Electron ${version} 到用户数据目录，用于运行声明该版本的 APP。是否继续？`,
-            '下载 Electron 版本',
-            { confirmButtonText: '下载', cancelButtonText: '取消', type: 'info' }
+            t('electronVersions.downloadConfirmPrompt', { version }),
+            t('electronVersions.downloadConfirmTitle'),
+            { confirmButtonText: t('electronVersions.downloadConfirmBtn'), cancelButtonText: t('common.cancel'), type: 'info' }
         );
     } catch (e) {
         return;
@@ -66,34 +68,34 @@ const handleDownload = async (version) => {
     try {
         const res = await electronStore.downloadElectron(version);
         if (res.success) {
-            notification.success(`Electron ${version} 下载安装成功`);
+            notification.success(t('electronVersions.downloadSuccess', { version }));
             await loadVersions();
             // 刷新 APP 列表：依赖该版本的 APP 现在可运行了（electronStatus 更新）
             // 主进程侧已补生成 launcher，这里同步前端状态
             await appsStore.fetchApps();
         } else {
-            notification.error(`Electron ${version} 下载失败：${res.error}`, '下载失败');
+            notification.error(t('electronVersions.downloadFailed', { version, error: res.error }), t('electronVersions.downloadFailedTitle'));
         }
     } catch (e) {
-        notification.error(`Electron ${version} 下载异常：${e.message}`, '下载失败');
+        notification.error(t('electronVersions.downloadError', { version, error: e.message }), t('electronVersions.downloadFailedTitle'));
     }
 };
 
 const handleCancelDownload = async () => {
     try {
         await electronStore.cancelDownload();
-        notification.success('已取消下载');
+        notification.success(t('electronVersions.cancelSuccess'));
     } catch (e) {
-        notification.error('取消失败: ' + e.message);
+        notification.error(t('electronVersions.cancelFailed', { error: e.message }));
     }
 };
 
 const handleDelete = async (version) => {
     try {
         await ElMessageBox.confirm(
-            `确认删除已下载的 Electron ${version}？使用该版本的 APP 将无法启动，需重新下载。`,
-            '删除版本',
-            { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+            t('electronVersions.deleteConfirmPrompt', { version }),
+            t('electronVersions.deleteConfirmTitle'),
+            { confirmButtonText: t('electronVersions.deleteConfirmBtn'), cancelButtonText: t('common.cancel'), type: 'warning' }
         );
     } catch (e) {
         return;
@@ -101,23 +103,23 @@ const handleDelete = async (version) => {
     try {
         const res = await window.api.manager.electronDelete(version);
         if (res.success) {
-            notification.success(`已删除 Electron ${version}`);
+            notification.success(t('electronVersions.deleteSuccess', { version }));
             await loadVersions();
             // 刷新 APP 列表：依赖该版本的 APP 现在缺运行时了（electronStatus 更新）
             // 主进程侧已清理 launcher，这里同步前端状态
             await appsStore.fetchApps();
         } else {
-            notification.error('删除失败: ' + res.error);
+            notification.error(t('electronVersions.deleteFailed', { error: res.error }));
         }
     } catch (e) {
-        notification.error('删除异常: ' + e.message);
+        notification.error(t('electronVersions.deleteError', { error: e.message }));
     }
 };
 
 const sourceLabel = (source) => {
-    if (source === 'builtin') return '内置';
-    if (source === 'downloaded') return '已下载';
-    return '未安装';
+    if (source === 'builtin') return t('electronVersions.statusBuiltin');
+    if (source === 'downloaded') return t('electronVersions.statusDownloaded');
+    return t('electronVersions.statusNotInstalled');
 };
 
 const sourceType = (source) => {
@@ -129,8 +131,8 @@ const sourceType = (source) => {
 // 下载中行的状态标签：覆盖 sourceLabel/sourceType
 function rowStatusLabel(row) {
     if (downloadingVersion.value === row.version) {
-        if (installing.value) return '解压中';
-        return `下载中 ${downloadProgress.value || 0}%`;
+        if (installing.value) return t('electronVersions.statusInstalling');
+        return t('electronVersions.statusDownloading', { progress: downloadProgress.value || 0 });
     }
     return sourceLabel(row.source);
 }
@@ -167,13 +169,10 @@ onMounted(() => {
     <div class="electron-versions-view">
         <div class="page-header">
             <div>
-                <h2 class="page-title">Electron 版本管理</h2>
-                <p class="page-desc">
-                    管理 APP 运行所需的 Electron 版本。内置版本由安装包提供，其他版本需在线下载。
-                    APP 通过 <code>.canbox-app</code> 声明所需版本，启动时自动选择。
-                </p>
+                <h2 class="page-title">{{ t('electronVersions.title') }}</h2>
+                <p class="page-desc">{{ t('electronVersions.desc') }}</p>
             </div>
-            <el-button :icon="'Refresh'" :loading="loading" @click="loadVersions">刷新</el-button>
+            <el-button :icon="'Refresh'" :loading="loading" @click="loadVersions">{{ t('electronVersions.refresh') }}</el-button>
         </div>
 
         <el-card v-loading="loading" shadow="never">
@@ -183,29 +182,29 @@ onMounted(() => {
                 :row-class-name="tableRowClassName"
                 :row-style="tableRowStyle"
             >
-                <el-table-column label="版本号" prop="version" width="140">
+                <el-table-column :label="t('electronVersions.colVersion')" prop="version" width="140">
                     <template #default="{ row }">
                         <span class="version-cell">Electron {{ row.version }}</span>
                     </template>
                 </el-table-column>
-                <el-table-column label="状态" min-width="140">
+                <el-table-column :label="t('electronVersions.colStatus')" min-width="140">
                     <template #default="{ row }">
                         <el-tag :type="rowStatusType(row)" size="small" :class="{ 'status-downloading': downloadingVersion === row.version }">
                             {{ rowStatusLabel(row) }}
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="平台支持" width="120">
+                <el-table-column :label="t('electronVersions.colPlatform')" width="120">
                     <template #default="{ row }">
                         <el-tag :type="row.supported ? 'success' : 'danger'" size="small" effect="plain">
-                            {{ row.supported ? '当前平台' : '不支持' }}
+                            {{ row.supported ? t('electronVersions.platformCurrent') : t('electronVersions.platformUnsupported') }}
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="220" align="right">
+                <el-table-column :label="t('electronVersions.colActions')" width="220" align="right">
                     <template #default="{ row }">
                         <template v-if="downloadingVersion === row.version">
-                            <el-button size="small" type="warning" plain @click="handleCancelDownload">取消</el-button>
+                            <el-button size="small" type="warning" plain @click="handleCancelDownload">{{ t('electronVersions.actionCancel') }}</el-button>
                         </template>
                         <template v-else-if="row.source === 'downloaded'">
                             <el-button
@@ -214,14 +213,14 @@ onMounted(() => {
                                 plain
                                 :disabled="!row.supported"
                                 @click="handleDelete(row.version)"
-                            >删除</el-button>
+                            >{{ t('electronVersions.actionDelete') }}</el-button>
                         </template>
                         <template v-else-if="row.source === null && row.supported">
                             <el-button
                                 size="small"
                                 type="primary"
                                 @click="handleDownload(row.version)"
-                            >下载</el-button>
+                            >{{ t('electronVersions.actionDownload') }}</el-button>
                         </template>
                     </template>
                 </el-table-column>
@@ -231,13 +230,13 @@ onMounted(() => {
         <div class="info-section">
             <el-alert type="info" :closable="false" show-icon>
                 <template #title>
-                    <span>说明</span>
+                    <span>{{ t('electronVersions.noticeTitle') }}</span>
                 </template>
                 <ul class="info-list">
-                    <li>内置版本（builtin）：安装包自带，仅一个，随 Canbox 升级而变更</li>
-                    <li>下载版本（downloaded）：用户在线下载，存于用户数据目录 <code>runtime/electron-{version}/</code></li>
-                    <li>APP 在 <code>.canbox-app</code> 中声明 <code>electron.range</code>，启动时按范围选择最高已装版本</li>
-                    <li>删除内置版本不可用，只能删除下载版本</li>
+                    <li>{{ t('electronVersions.noticeBuiltin') }}</li>
+                    <li>{{ t('electronVersions.noticeDownloaded') }}</li>
+                    <li>{{ t('electronVersions.noticeRange') }}</li>
+                    <li>{{ t('electronVersions.noticeDelete') }}</li>
                 </ul>
             </el-alert>
         </div>
