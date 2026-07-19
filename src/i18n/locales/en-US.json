@@ -145,7 +145,16 @@
             "updateNow": "Update Now",
             "downloading": "Downloading ",
             "downloadFailed": "Download failed",
-            "checkFailed": "Update check failed"
+            "checkFailed": "Update check failed",
+            "installFailed": "Install failed",
+            "tasksRunningTitle": "Tasks in progress",
+            "tasksRunningPrompt": "The following tasks are in progress: {tasks}. Continuing will interrupt them. Restart now?",
+            "electronDownloading": "Electron version download",
+            "appInstalling": "App installation",
+            "taskRunning": "Task execution",
+            "restartNow": "Restart Now",
+            "waitFinish": "Wait",
+            "pendingRestartNotice": "New version is ready. Click \"Restart Now\" to install."
         }
     },
     "common": {

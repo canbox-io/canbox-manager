@@ -102,6 +102,7 @@ const api = {
         updateCheck: () => ipcRenderer.invoke('manager.update.check'),
         updateDownload: (downloadUrl) => ipcRenderer.invoke('manager.update.download', downloadUrl),
         updateInstall: (installerPath) => ipcRenderer.invoke('manager.update.install', installerPath),
+        tasksListRunning: () => ipcRenderer.invoke('manager.tasks.listRunning'),
         onUpdateAvailable: (callback) => {
             const handler = (_e, data) => callback(data);
             ipcRenderer.on('manager.update.available', handler);

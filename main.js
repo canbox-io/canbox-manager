@@ -1270,6 +1270,7 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
 });
 
 ipcMain.handle('manager.repos.install', async (_e, repoId) => {
+    appInstallTasks.set(repoId, { startedAt: Date.now() });
     try {
         const repos = getAllRepos();
         const repo = repos[repoId];
@@ -1342,6 +1343,8 @@ ipcMain.handle('manager.repos.install', async (_e, repoId) => {
         return { success: true, appId: importResult.appId };
     } catch (e) {
         return { success: false, error: e.message };
+    } finally {
+        appInstallTasks.delete(repoId);
     }
 });
 
@@ -1576,6 +1579,9 @@ const RUNTIME_DIR = path.join(env.userData, 'runtime');
 
 // 下载进度回调表（taskId → onProgress），供 cancel 用
 const electronDownloadTasks = new Map();
+
+// APP 仓库安装任务状态表（repoId → { appId, startedAt }），供并发冲突检测用
+const appInstallTasks = new Map();
 
 /**
  * 递归解压 zip 到目标目录
@@ -1836,12 +1842,36 @@ ipcMain.handle('manager.update.download', async (_e, downloadUrl) => {
 });
 
 ipcMain.handle('manager.update.install', async (_e, installerPath) => {
+    // 防御性检查：即使前端已确认，这里也兜底，避免并发任务被强制中断
+    if (electronDownloadTasks.size > 0 || appInstallTasks.size > 0) {
+        return {
+            success: false,
+            error: 'TASKS_RUNNING',
+            code: 'TASKS_RUNNING',
+            runningTasks: {
+                electron: electronDownloadTasks.size,
+                app: appInstallTasks.size
+            }
+        };
+    }
     try {
         updater.runInstallerAndQuit(installerPath);
         return { success: true };
     } catch (e) {
         return { success: false, error: e.message };
     }
+});
+
+// 查询当前进行中的任务（供升级流程做并发冲突检测）
+ipcMain.handle('manager.tasks.listRunning', async () => {
+    const tasks = [];
+    for (const [taskId] of electronDownloadTasks.entries()) {
+        tasks.push({ type: 'electron_download', taskId });
+    }
+    for (const [repoId, info] of appInstallTasks.entries()) {
+        tasks.push({ type: 'app_install', repoId, startedAt: info.startedAt });
+    }
+    return { success: true, tasks };
 });
 
 ipcMain.handle('manager.dialog.showOpenDialog', async (_e, options) => {

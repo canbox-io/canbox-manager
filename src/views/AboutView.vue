@@ -1,7 +1,8 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
+import { ElMessageBox } from 'element-plus';
 import logoUrl from '../../logo.svg';
 import notification from '@/utils/notification';
 import { useUpdaterStore } from '@/stores/updater';
@@ -14,7 +15,7 @@ const appVersion = __APP_VERSION__;
 
 // 更新状态从 store 获取，跨视图保持
 const updater = useUpdaterStore();
-const { updateInfo, checking, downloading, downloadProgress } = storeToRefs(updater);
+const { updateInfo, checking, downloading, downloadProgress, pendingRestart } = storeToRefs(updater);
 
 onMounted(async () => {
     try {
@@ -26,7 +27,86 @@ onMounted(async () => {
 
     // 确保全局事件监听已注册（store 内部只注册一次）
     updater.ensureListeners();
+
+    // 进入待重启状态时弹窗询问用户
+    if (pendingRestart.value) {
+        promptRestartNow();
+    }
 });
+
+// 监听 pendingRestart 变化：下载完成且有并发任务时弹窗
+watch(pendingRestart, (val) => {
+    if (val) {
+        promptRestartNow();
+    }
+});
+
+// 把任务列表翻译成可读文案
+function describeTasks(tasks) {
+    return tasks.map((task) => {
+        if (task.type === 'electron_download') return t('about.update.electronDownloading');
+        if (task.type === 'app_install') return t('about.update.appInstalling');
+        return t('about.update.taskRunning');
+    });
+}
+
+// 下载完成但有并发任务：弹窗询问用户是立即重启还是等待
+async function promptRestartNow() {
+    try {
+        const tasks = await updater.checkRunningTasks();
+        if (tasks.length === 0) {
+            // 任务已结束，直接安装
+            const result = await updater.installNow();
+            if (!result.success && result.code !== 'TASKS_RUNNING') {
+                notification.error(result.error || t('about.update.installFailed'));
+            }
+            return;
+        }
+        const desc = describeTasks(tasks).join('、');
+        await ElMessageBox.confirm(
+            t('about.update.tasksRunningPrompt', { tasks: desc }),
+            t('about.update.tasksRunningTitle'),
+            {
+                confirmButtonText: t('about.update.restartNow'),
+                cancelButtonText: t('about.update.waitFinish'),
+                type: 'warning'
+            }
+        );
+        // 用户选择立即重启
+        const result = await updater.installNow();
+        if (!result.success && result.code !== 'TASKS_RUNNING') {
+            notification.error(result.error || t('about.update.installFailed'));
+        }
+    } catch (e) {
+        // 用户选择等待，不做任何操作，保留 pendingRestart 状态
+    }
+}
+
+// 用户在关于页点击"立即重启"按钮
+async function restartNow() {
+    // 再次检查并发任务（用户可能在等待期间又发起了新任务）
+    const tasks = await updater.checkRunningTasks();
+    if (tasks.length > 0) {
+        const desc = describeTasks(tasks).join('、');
+        try {
+            await ElMessageBox.confirm(
+                t('about.update.tasksRunningPrompt', { tasks: desc }),
+                t('about.update.tasksRunningTitle'),
+                {
+                    confirmButtonText: t('about.update.restartNow'),
+                    cancelButtonText: t('about.update.waitFinish'),
+                    type: 'warning'
+                }
+            );
+        } catch (e) {
+            return; // 用户取消
+        }
+    }
+    const result = await updater.installNow();
+    if (!result.success && result.code !== 'TASKS_RUNNING') {
+        notification.error(result.error || t('about.update.installFailed'));
+    }
+}
 
 const infoItems = [
     { key: 'coreVersion', value: coreVersion, i18n: 'about.coreVersion' },
@@ -104,16 +184,27 @@ async function doUpdate() {
                             {{ $t('about.update.checkUpdate') }}
                         </el-button>
                         <el-button
-                            v-if="updateInfo && updateInfo.hasUpdate && !downloading"
+                            v-if="updateInfo && updateInfo.hasUpdate && !downloading && !pendingRestart"
                             type="primary"
                             @click="doUpdate"
                         >
                             {{ $t('about.update.updateNow') }}
                         </el-button>
+                        <el-button
+                            v-if="pendingRestart"
+                            type="primary"
+                            @click="restartNow"
+                        >
+                            {{ $t('about.update.restartNow') }}
+                        </el-button>
                     </div>
 
-                    <div v-if="updateInfo && updateInfo.hasUpdate" class="update-notice">
+                    <div v-if="updateInfo && updateInfo.hasUpdate && !pendingRestart" class="update-notice">
                         {{ $t('about.update.newVersionAvailable') }}
+                    </div>
+
+                    <div v-if="pendingRestart" class="update-notice pending-notice">
+                        {{ $t('about.update.pendingRestartNotice') }}
                     </div>
 
                     <div v-if="downloading" class="download-progress">
@@ -278,6 +369,11 @@ async function doUpdate() {
     padding: 8px 12px;
     background: var(--el-color-success-light-9);
     border-radius: 4px;
+}
+
+.pending-notice {
+    color: var(--el-color-warning);
+    background: var(--el-color-warning-light-9);
 }
 
 .new-version {
