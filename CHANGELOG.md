@@ -4,6 +4,14 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.1.8] - 2026-07-20
+
+### feat | 新功能 / Features
+
+更新器增加并发任务检测，安装更新前提示有待重启的挂起任务
+
+Updater adds concurrent task detection and pending restart prompt before update install
+
 ## [0.1.7] - 2026-07-18
 
 ### fix | 问题修复 / Bug Fixes
