@@ -7,14 +7,11 @@
 
 set -e
 
-# 推导 CANBOX_HOME（脚本所在目录的上级目录）
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 CANBOX_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 CORE="$CANBOX_HOME/canbox-core/injection.js"
-SELECTOR="$CANBOX_HOME/canbox-core/lib/electron-selector.js"
 
-# 检查 injection.js 是否存在
 if [ ! -f "$CORE" ]; then
     echo "[canbox] 错误: 找不到 canbox-core: $CORE" >&2
     exit 1
@@ -23,22 +20,17 @@ fi
 export CANBOX_ENV=production
 export NODE_ENV=production
 
-# 解析用户数据目录（与 canbox-core/lib/env.js 的逻辑一致）
-# 优先级: CANBOX_USER_DATA > CANBOX_HOME(env) > ~/.config/canbox (Linux) / ~/Library/Application Support/canbox (macOS)
 USER_DATA="${CANBOX_USER_DATA:-${CANBOX_HOME_ENV:-$HOME/.config/canbox}}"
 
-# 从 {userData}/paths.json 读取 usersPath
 USERS_PATH=""
 PATHS_JSON="$USER_DATA/paths.json"
 if [ -f "$PATHS_JSON" ]; then
     USERS_PATH=$(grep -o '"usersPath"[[:space:]]*:[[:space:]]*"[^"]*"' "$PATHS_JSON" | head -1 | sed 's/.*: *"//;s/".*$//')
 fi
-# 回退到默认值
 if [ -z "$USERS_PATH" ]; then
     USERS_PATH="$USER_DATA/Users"
 fi
 
-# 扫描程序目录中的 builtin electron（electron-{ver}/electron）
 findBuiltinElectron() {
     local dir
     for dir in "$CANBOX_HOME"/electron-*/; do
@@ -50,31 +42,218 @@ findBuiltinElectron() {
     return 1
 }
 
-# 通过 selector 选择 APP 的 electron 版本
-# 返回 electron 路径（stdout），或报错退出
+# ====== 纯 bash 实现 electron-selector 核心逻辑 ======
+
+# 白名单版本
+declare -A ALLOWED_VERSIONS=(
+    ['42.5.1']=1
+)
+
+# 解析版本号
+parseVersion() {
+    local ver="$1"
+    IFS='.' read -r major minor patch <<< "$ver"
+    printf "%03d.%03d.%03d" "${major:-0}" "${minor:-0}" "${patch:-0}"
+}
+
+# 比较版本: a > b 返回 1, a < b 返回 -1, 相等返回 0
+compareVersions() {
+    local a_normalized=$(parseVersion "$1")
+    local b_normalized=$(parseVersion "$2")
+    if [ "$a_normalized" \> "$b_normalized" ]; then
+        echo 1
+    elif [ "$a_normalized" \< "$b_normalized" ]; then
+        echo -1
+    else
+        echo 0
+    fi
+}
+
+# 检查版本是否满足 range（支持 ^x.y.z 和精确匹配）
+satisfies() {
+    local version="$1"
+    local range="$2"
+    range=$(echo "$range" | tr -d '[:space:]')
+
+    if [ -z "$range" ] || [ "$range" = "*" ]; then
+        return 0
+    fi
+
+    if [[ "$range" == ^* ]]; then
+        local target="${range:1}"
+        IFS='.' read -r tmajor tminor tpatch <<< "$target"
+        IFS='.' read -r vmajor vminor vpatch <<< "$version"
+
+        if [ "$vmajor" != "$tmajor" ]; then
+            return 1
+        fi
+        local cmp=$(compareVersions "$version" "$target")
+        [ "$cmp" -ge 0 ]
+        return $?
+    fi
+
+    local cmp=$(compareVersions "$version" "$range")
+    [ "$cmp" -eq 0 ]
+    return $?
+}
+
+# 获取 .canbox-app 中的 electron.range
+getElectronRange() {
+    local app_dir="$1"
+    local meta_file="$app_dir/.canbox-app"
+    if [ ! -f "$meta_file" ]; then
+        echo ""
+        return
+    fi
+    local range=$(grep -o '"range"[[:space:]]*:[[:space:]]*"[^"]*"' "$meta_file" | head -1 | sed 's/.*: *"//;s/".*$//')
+    echo "$range"
+}
+
+# 扫描 builtin electron 版本
+scanBuiltinVersions() {
+    local electronBinaryName="electron"
+    if [ "$(uname -s)" = "Darwin" ]; then
+        electronBinaryName="Electron.app/Contents/MacOS/Electron"
+    elif [ "$(uname -s)" = "Windows_NT" ]; then
+        electronBinaryName="electron.exe"
+    fi
+
+    local results=""
+    for dir in "$CANBOX_HOME"/electron-*/; do
+        if [ -d "$dir" ] && [ -f "$dir/$electronBinaryName" ]; then
+            local ver="${dir%/}"
+            ver="${ver##*/}"
+            ver="${ver##electron-}"
+            results="$results $ver"
+        fi
+    done
+    echo "$results"
+}
+
+# 读取 downloaded 版本注册表
+readDownloadedVersions() {
+    local registryPath="$USER_DATA/runtime/electron-registry.json"
+    if [ ! -f "$registryPath" ]; then
+        echo ""
+        return
+    fi
+    local versions=$(grep -o '"electron"[[:space:]]*:[[:space:]]*"[^"]*"' "$registryPath" | sed 's/.*: *"//;s/".*$//')
+    echo "$versions"
+}
+
+# 解析下载注册表获取版本路径
+getDownloadedVersionPath() {
+    local ver="$1"
+    local registryPath="$USER_DATA/runtime/electron-registry.json"
+    if [ ! -f "$registryPath" ]; then
+        echo ""
+        return
+    fi
+    local path=$(grep -A 5 "\"electron\": \"$ver\"" "$registryPath" | grep -o '"path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*: *"//;s/".*$//')
+    if [ -z "$path" ]; then
+        echo ""
+        return
+    fi
+    local electronBinaryName="electron"
+    if [ "$(uname -s)" = "Darwin" ]; then
+        electronBinaryName="Electron.app/Contents/MacOS/Electron"
+    elif [ "$(uname -s)" = "Windows_NT" ]; then
+        electronBinaryName="electron.exe"
+    fi
+    local fullPath="$USER_DATA/runtime/$path/$electronBinaryName"
+    if [ -f "$fullPath" ]; then
+        echo "$fullPath"
+    else
+        echo ""
+    fi
+}
+
+# 通过 bash 实现的 selector 选择 APP 的 electron 版本
 resolveAppElectron() {
     local app_dir="$1"
-    local result exit_code
-    result=$(node "$SELECTOR" \
-        --app-dir "$app_dir" \
-        --canbox-home "$CANBOX_HOME" \
-        --user-data "$USER_DATA" 2>&1)
-    exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        echo "$result"
-        return 0
-    elif [ $exit_code -eq 2 ]; then
-        echo "[canbox] 需要下载 electron: $result" >&2
-        exit 1
-    else
-        echo "[canbox] 错误: $result" >&2
+
+    local range=$(getElectronRange "$app_dir")
+    if [ -z "$range" ]; then
+        echo "[canbox] 错误: APP 未声明 electron 版本（.canbox-app 中 electron.range 缺失）" >&2
         exit 1
     fi
+
+    local allowed_candidates=""
+    for ver in "${!ALLOWED_VERSIONS[@]}"; do
+        if satisfies "$ver" "$range"; then
+            allowed_candidates="$allowed_candidates $ver"
+        fi
+    done
+
+    if [ -z "$allowed_candidates" ]; then
+        echo "[canbox] 错误: canbox 未纳入满足 $range 的 electron 版本" >&2
+        exit 1
+    fi
+
+    local builtin_versions=$(scanBuiltinVersions)
+    local downloaded_versions=$(readDownloadedVersions)
+
+    local all_candidates="$builtin_versions $downloaded_versions"
+
+    local valid_candidates=""
+    for ver in $all_candidates; do
+        for allowed in $allowed_candidates; do
+            if [ "$ver" = "$allowed" ]; then
+                valid_candidates="$valid_candidates $ver"
+                break
+            fi
+        done
+    done
+
+    if [ -z "$valid_candidates" ]; then
+        local highest_allowed=""
+        for ver in $allowed_candidates; do
+            if [ -z "$highest_allowed" ] || [ "$(compareVersions "$ver" "$highest_allowed")" -gt 0 ]; then
+                highest_allowed="$ver"
+            fi
+        done
+        echo "[canbox] 需要下载 electron: $highest_allowed" >&2
+        exit 1
+    fi
+
+    local selected_version=""
+    for ver in $valid_candidates; do
+        if [ -z "$selected_version" ] || [ "$(compareVersions "$ver" "$selected_version")" -gt 0 ]; then
+            selected_version="$ver"
+        fi
+    done
+
+    local electronPath=""
+    local found_in_builtin=0
+    for ver in $builtin_versions; do
+        if [ "$ver" = "$selected_version" ]; then
+            found_in_builtin=1
+            break
+        fi
+    done
+
+    if [ "$found_in_builtin" -eq 1 ]; then
+        local electronBinaryName="electron"
+        if [ "$(uname -s)" = "Darwin" ]; then
+            electronBinaryName="Electron.app/Contents/MacOS/Electron"
+        elif [ "$(uname -s)" = "Windows_NT" ]; then
+            electronBinaryName="electron.exe"
+        fi
+        electronPath="$CANBOX_HOME/electron-$selected_version/$electronBinaryName"
+    else
+        electronPath=$(getDownloadedVersionPath "$selected_version")
+    fi
+
+    if [ -z "$electronPath" ] || [ ! -f "$electronPath" ]; then
+        echo "[canbox] 错误: 找不到 electron 二进制文件: $selected_version" >&2
+        exit 1
+    fi
+
+    echo "$electronPath"
 }
 
 case "${1:-}" in
     manager)
-        # manager 用 builtin electron（程序自带）
         ELECTRON=$(findBuiltinElectron) || {
             echo "[canbox] 错误: 找不到 builtin electron（$CANBOX_HOME/electron-*/electron）" >&2
             exit 1
@@ -88,7 +267,6 @@ case "${1:-}" in
             exit 1
         fi
         APP_DIR="$USERS_PATH/apps/$APP_ID"
-        # 优先加载 app.asar，兼容源码目录模式
         if [ -f "$APP_DIR/app.asar" ]; then
             APP_TARGET="$APP_DIR/app.asar"
         elif [ -d "$APP_DIR" ]; then
@@ -98,11 +276,8 @@ case "${1:-}" in
             exit 1
         fi
 
-        # 通过 selector 选择 electron 版本
         ELECTRON=$(resolveAppElectron "$APP_DIR")
 
-        # 从 .canbox-app 判断是否为网页应用（type === 'web'）
-        # 网页应用不注入 canbox-core，使用独立 userData，避免共享 profile 污染和初始化延迟
         IS_WEB_APP=0
         CANBOX_APP_FILE="$APP_DIR/.canbox-app"
         if [ -f "$CANBOX_APP_FILE" ]; then
