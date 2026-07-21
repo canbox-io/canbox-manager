@@ -4,13 +4,19 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
-## [0.1.8] - 2026-07-20
+## [0.1.8] - 2026-07-21
 
 ### feat | 新功能 / Features
 
 更新器增加并发任务检测，安装更新前提示有待重启的挂起任务
 
 Updater adds concurrent task detection and pending restart prompt before update install
+
+### fix | 问题修复 / Bug Fixes
+
+修复 Linux 安装脚本在 `set -e` 模式下 `grep`/`sed` 无匹配时退出码导致脚本中断的问题，添加 `|| true` 处理
+
+Fix Linux installer script crashing due to grep/sed non-zero exit codes in `set -e` mode, add `|| true` handling
 
 ## [0.1.7] - 2026-07-18
 
