@@ -261,7 +261,7 @@ async function openReadme(repo) {
             width="480px"
             :close-on-click-modal="false"
         >
-            <el-form label-position="top">
+            <el-form label-position="top" @submit.native.prevent>
                 <el-form-item :label="$t('repos.url')">
                     <el-input
                         v-model="addForm.url"
