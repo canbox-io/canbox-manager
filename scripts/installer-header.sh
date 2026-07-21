@@ -39,9 +39,9 @@ detectExistingInstall() {
     # 1. 从 desktop 文件 Exec 行反解
     local desktop_file="$HOME/.local/share/applications/canbox.desktop"
     if [ -f "$desktop_file" ]; then
-        local exec_line=$(grep '^Exec=' "$desktop_file" | head -1)
+        local exec_line=$(grep '^Exec=' "$desktop_file" 2>/dev/null | head -1) || true
         # Exec="/path/to/bin/canbox" manager  或  Exec=/path/to/bin/canbox manager
-        local path=$(echo "$exec_line" | sed -E 's/^Exec="?([^"]+)"? .*/\1/')
+        local path=$(echo "$exec_line" | sed -E 's/^Exec="?([^"]+)"? .*/\1/' 2>/dev/null) || true
         # 取 bin/canbox 的上级上级目录
         if [ -n "$path" ] && [ -f "$path" ]; then
             local bin_dir=$(dirname "$path")
@@ -176,7 +176,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     INSTALL_DIR="${2:-/opt/canbox}"
     # 如果未指定路径，探测已安装路径
     if [ -z "${2:-}" ]; then
-        INSTALL_DIR=$(detectExistingInstall)
+        INSTALL_DIR=$(detectExistingInstall) || true
         if [ -z "$INSTALL_DIR" ]; then
             INSTALL_DIR="/opt/canbox"
         fi
@@ -210,7 +210,7 @@ fi
 killRunningManager
 
 # 探测已安装路径
-EXISTING_DIR=$(detectExistingInstall)
+EXISTING_DIR=$(detectExistingInstall) || true
 
 if [ "$UPDATE_MODE" = "1" ]; then
     # 非交互更新模式：必须有已安装路径，否则报错
