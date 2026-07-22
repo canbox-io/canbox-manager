@@ -83,6 +83,13 @@ app.directive('loading', ElLoading.directive);
 app.mount('#app');
 const _tMounted = performance.now();
 
+// 移除首屏 loading 动画（Vue 挂载后实际内容已渲染）
+const _loading = document.getElementById('app-loading');
+if (_loading) {
+    _loading.classList.add('hide');
+    setTimeout(() => _loading.remove(), 200);
+}
+
 // ====== 缩放快捷键（Ctrl+滚轮 / Ctrl++ / Ctrl+- / Ctrl+0） ======
 let currentZoom = 1.0;
 
