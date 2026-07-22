@@ -4,6 +4,42 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.1.9] - 2026-07-22
+
+### feat | 新功能 / Features
+
+添加首屏加载动画并在 Vue 挂载后自动移除
+
+Add splash screen loading animation, auto-removed after Vue mount
+
+### fix | 问题修复 / Bug Fixes
+
+修复启动时多个 Electron 应用共享 userData 目录导致的锁竞争，造成 5 秒 UI 加载延迟问题
+
+修复 BrowserWindow 渲染进程共享 partition 导致的 leveldb LOCK 竞争问题
+
+Fix 5-second UI loading delay caused by userData directory lock contention between multiple Electron apps
+
+Fix leveldb LOCK contention caused by shared BrowserWindow partition in renderer processes
+
+### refactor | 重构 / Refactoring
+
+重构 Windows 启动脚本的 Electron 版本选择逻辑
+
+Refactor Electron version selection logic in Windows startup script
+
+### ci | CI / CI
+
+优化 GitHub 发布流程，增加镜像源测速自动选择逻辑
+
+Optimize GitHub release workflow with mirror speed detection and auto-selection
+
+### release | 发布 / Release
+
+将版本号从 0.1.8 升级至 0.1.9
+
+Bump version from 0.1.8 to 0.1.9
+
 ## [0.1.8] - 2026-07-21
 
 ### feat | 新功能 / Features
