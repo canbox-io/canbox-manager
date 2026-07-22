@@ -4,12 +4,9 @@ REM 用法: canbox.bat manager | canbox.bat app <appId>
 
 setlocal enabledelayedexpansion
 
-REM 推导 CANBOX_HOME（脚本所在目录的上级目录）
 set CANBOX_HOME=%~dp0..
 set CORE=%CANBOX_HOME%\canbox-core\injection.js
-set SELECTOR=%CANBOX_HOME%\canbox-core\lib\electron-selector.js
 
-REM 检查 injection.js
 if not exist "%CORE%" (
     echo [canbox] 错误: 找不到 canbox-core: %CORE% >&2
     exit /b 1
@@ -18,7 +15,6 @@ if not exist "%CORE%" (
 set CANBOX_ENV=production
 set NODE_ENV=production
 
-REM 解析用户数据目录（与 canbox-core/lib/env.js 一致）
 if defined CANBOX_USER_DATA (
     set USER_DATA=%CANBOX_USER_DATA%
 ) else if defined CANBOX_HOME_ENV (
@@ -27,7 +23,6 @@ if defined CANBOX_USER_DATA (
     set USER_DATA=%APPDATA%\canbox
 )
 
-REM 从 paths.json 读取 usersPath（用 PowerShell 解析 JSON）
 set USERS_PATH=%USER_DATA%\Users
 set PATHS_JSON=%USER_DATA%\paths.json
 if exist "%PATHS_JSON%" (
@@ -36,7 +31,6 @@ if exist "%PATHS_JSON%" (
     )
 )
 
-REM 扫描程序目录中的 builtin electron（electron-{ver}/electron.exe）
 set BUILTIN_ELECTRON=
 for /d %%d in ("%CANBOX_HOME%\electron-*") do (
     if exist "%%d\electron.exe" (
@@ -70,8 +64,130 @@ if "%1"=="app" (
         )
     )
 
-    REM 通过 selector 选择 electron 版本
-    for /f "usebackq delims=" %%i in (`node "%SELECTOR%" --app-dir "!APP_DIR!" --canbox-home "%CANBOX_HOME%" --user-data "%USER_DATA%" 2^>^&1`) do (
+    REM 通过 PowerShell 实现的 selector 选择 electron 版本
+    for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "
+        $canboxHome = '%CANBOX_HOME%';
+        $userData = '%USER_DATA%';
+        $appDir = '!APP_DIR!';
+        
+        $ALLOWED_VERSIONS = @{'42.5.1' = $true};
+        
+        function ParseVersion($ver) {
+            $parts = $ver -split '\.' | ForEach-Object { [int]$_ };
+            return '{0:D3}.{1:D3}.{2:D3}' -f ($parts[0], $parts[1], $parts[2]);
+        }
+        
+        function CompareVersions($a, $b) {
+            $aNorm = ParseVersion $a;
+            $bNorm = ParseVersion $b;
+            if ($aNorm -gt $bNorm) { return 1 };
+            if ($aNorm -lt $bNorm) { return -1 };
+            return 0;
+        }
+        
+        function Satisfies($version, $range) {
+            $range = $range.Trim();
+            if ($range -eq '' -or $range -eq '*') { return $true };
+            
+            if ($range.StartsWith('^')) {
+                $target = $range.Substring(1);
+                $tParts = $target -split '\.' | ForEach-Object { [int]$_ };
+                $vParts = $version -split '\.' | ForEach-Object { [int]$_ };
+                
+                if ($vParts[0] -ne $tParts[0]) { return $false };
+                return (CompareVersions $version $target) -ge 0;
+            }
+            
+            return (CompareVersions $version $range) -eq 0;
+        }
+        
+        function GetElectronRange($appDir) {
+            $metaFile = Join-Path $appDir '.canbox-app';
+            if (-not (Test-Path $metaFile)) { return '' };
+            $content = Get-Content $metaFile -Raw;
+            if ($content -match '\"range\"\s*:\s*\"([^\"]+)\"') { return $matches[1] };
+            return '';
+        }
+        
+        function ScanBuiltinVersions($canboxHome) {
+            $result = @();
+            Get-ChildItem -Path (Join-Path $canboxHome 'electron-*') -Directory | ForEach-Object {
+                $electronExe = Join-Path $_.FullName 'electron.exe';
+                if (Test-Path $electronExe) {
+                    $ver = $_.Name -replace '^electron-', '';
+                    $result += $ver;
+                }
+            }
+            return $result;
+        }
+        
+        function ReadDownloadedVersions($userData) {
+            $registryPath = Join-Path $userData 'runtime\electron-registry.json';
+            if (-not (Test-Path $registryPath)) { return @() };
+            try {
+                $content = Get-Content $registryPath -Raw;
+                $json = $content | ConvertFrom-Json;
+                return $json.installedVersions.PSObject.Properties.Value | Where-Object { $_.electron } | ForEach-Object { $_.electron };
+            } catch {
+                return @();
+            }
+        }
+        
+        function GetDownloadedVersionPath($userData, $ver) {
+            $registryPath = Join-Path $userData 'runtime\electron-registry.json';
+            if (-not (Test-Path $registryPath)) { return '' };
+            try {
+                $content = Get-Content $registryPath -Raw;
+                $json = $content | ConvertFrom-Json;
+                $entry = $json.installedVersions.PSObject.Properties.Value | Where-Object { $_.electron -eq $ver };
+                if ($entry) {
+                    $electronExe = Join-Path $userData ('runtime\{0}\electron.exe' -f $entry.path);
+                    if (Test-Path $electronExe) { return $electronExe };
+                }
+            } catch {}
+            return '';
+        }
+        
+        $range = GetElectronRange $appDir;
+        if (-not $range) {
+            Write-Error 'APP 未声明 electron 版本';
+            exit 1;
+        }
+        
+        $allowedCandidates = $ALLOWED_VERSIONS.Keys | Where-Object { Satisfies $_ $range };
+        if (-not $allowedCandidates) {
+            Write-Error ('canbox 未纳入满足 {0} 的 electron 版本' -f $range);
+            exit 1;
+        }
+        
+        $builtinVersions = ScanBuiltinVersions $canboxHome;
+        $downloadedVersions = ReadDownloadedVersions $userData;
+        
+        $allCandidates = $builtinVersions + $downloadedVersions;
+        $validCandidates = $allCandidates | Where-Object { $allowedCandidates -contains $_ };
+        
+        if (-not $validCandidates) {
+            $highestAllowed = $allowedCandidates | Sort-Object -Descending { CompareVersions $_ '' } | Select-Object -First 1;
+            Write-Error ('需要下载 electron: {0}' -f $highestAllowed);
+            exit 1;
+        }
+        
+        $selectedVersion = $validCandidates | Sort-Object -Descending { CompareVersions $_ '' } | Select-Object -First 1;
+        
+        $electronPath = '';
+        if ($builtinVersions -contains $selectedVersion) {
+            $electronPath = Join-Path $canboxHome ('electron-{0}\electron.exe' -f $selectedVersion);
+        } else {
+            $electronPath = GetDownloadedVersionPath $userData $selectedVersion;
+        }
+        
+        if (-not $electronPath -or -not (Test-Path $electronPath)) {
+            Write-Error ('找不到 electron 二进制文件: {0}' -f $selectedVersion);
+            exit 1;
+        }
+        
+        Write-Output $electronPath;
+    " 2^>^&1`) do (
         set SELECTOR_OUTPUT=%%i
     )
     if errorlevel 2 (
@@ -84,7 +200,6 @@ if "%1"=="app" (
     )
     set ELECTRON=!SELECTOR_OUTPUT!
 
-    REM 从 .canbox-app 判断是否为网页应用（type === 'web'）
     set IS_WEB_APP=0
     set CANBOX_APP_FILE=!APP_DIR!\.canbox-app
     if exist "!CANBOX_APP_FILE!" (
