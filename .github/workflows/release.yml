@@ -28,12 +28,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: https://registry.npmmirror.com/
 
-      - name: Set Electron mirror
+      - name: Detect optimal npm registry
         run: |
-          echo "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" >> $GITHUB_ENV
-          echo "ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/" >> $GITHUB_ENV
+          if curl -s -o /dev/null -w "%{time_total}" https://registry.npmmirror.com/ | awk '{exit ($1 < 0.5) ? 0 : 1}'; then
+            echo "npm_registry=https://registry.npmmirror.com/" >> $GITHUB_ENV
+            echo "Using npmmirror (fast connection)"
+          else
+            echo "npm_registry=https://registry.npmjs.org/" >> $GITHUB_ENV
+            echo "Using npm official (npmmirror slow)"
+          fi
+
+      - name: Configure npm registry
+        run: npm config set registry ${{ env.npm_registry }}
+
+      - name: Detect optimal Electron mirror
+        run: |
+          if curl -s -o /dev/null -w "%{time_total}" https://npmmirror.com/mirrors/electron/ | awk '{exit ($1 < 0.5) ? 0 : 1}'; then
+            echo "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" >> $GITHUB_ENV
+            echo "ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/" >> $GITHUB_ENV
+            echo "Using npmmirror Electron mirror (fast connection)"
+          else
+            echo "ELECTRON_MIRROR=https://github.com/electron/electron/releases/download/" >> $GITHUB_ENV
+            echo "ELECTRON_BUILDER_BINARIES_MIRROR=https://github.com/electron-userland/electron-builder-binaries/releases/download/" >> $GITHUB_ENV
+            echo "Using GitHub direct (npmmirror slow)"
+          fi
 
       - name: Install canbox-core dependencies
         run: npm install --no-audit --no-fund

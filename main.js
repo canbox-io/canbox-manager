@@ -149,7 +149,7 @@ ipcMain.handle('manager.apps.list', async () => {
                                 ok: false,
                                 needDownload: true,
                                 version: probe.version,
-                                url: probe.url
+                                urls: probe.urls
                             };
                         }
                     }
@@ -505,7 +505,7 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
                 success: false,
                 needDownload: true,
                 version: electronResult.version,
-                url: electronResult.url
+                urls: electronResult.urls
             };
         }
         const electronPath = electronResult.path;
@@ -1569,7 +1569,7 @@ ipcMain.handle('manager.zoom.reset', async () => {
 // 扫描 builtin（程序目录）和 downloaded（用户数据目录）的 electron 版本，
 // 支持在线下载白名单中的版本到 userData/runtime/
 
-const { ALLOWED_ELECTRON, scanBuiltinVersions, readDownloadedRegistry, getRegistryPath, getPlatformKey } =
+const { ALLOWED_ELECTRON, scanBuiltinVersions, readDownloadedRegistry, getRegistryPath, getPlatformKey, getDownloadUrls, probeDownloadMirrors } =
     require(path.join(CORE_PATH, 'lib', 'electron-selector'));
 
 // builtin electron 所在目录（CORE_PATH 的上级 = CANBOX_HOME）
@@ -1666,7 +1666,7 @@ ipcMain.handle('manager.electron.listAllowed', async () => {
         installed: installedVersions.has(ver),
         source: builtin.find(v => v.version === ver) ? 'builtin' :
                 (downloaded.installedVersions && Object.values(downloaded.installedVersions).find(v => v.electron === ver) ? 'downloaded' : null),
-        supported: !!(ALLOWED_ELECTRON[ver].download && ALLOWED_ELECTRON[ver].download[platformKey])
+        supported: !!(getDownloadUrls(ver, platformKey) && getDownloadUrls(ver, platformKey).length > 0)
     }));
     console.log('[main] listAllowed 返回:', JSON.stringify(list.map(v => `${v.version}=${v.source}`)));
     list.sort((a, b) => {
@@ -1692,13 +1692,15 @@ ipcMain.handle('manager.electron.listDownloaded', async () => {
     return { success: true, versions: list };
 });
 
-// 下载并安装指定 electron 版本
+// 下载并安装指定 electron 版本（支持多镜像源测速选择）
 ipcMain.handle('manager.electron.download', async (_e, version) => {
     const entry = ALLOWED_ELECTRON[version];
     if (!entry) return { success: false, error: `版本 ${version} 不在白名单中` };
     const platformKey = getPlatformKey();
-    const url = entry.download && entry.download[platformKey];
-    if (!url) return { success: false, error: `版本 ${version} 不支持当前平台 ${platformKey}` };
+
+    // 获取所有候选下载 URL（各镜像源）
+    const urls = getDownloadUrls(version, platformKey);
+    if (!urls || urls.length === 0) return { success: false, error: `版本 ${version} 不支持当前平台 ${platformKey}` };
 
     // 目标目录：userData/runtime/electron-{version}/
     const targetDir = path.join(RUNTIME_DIR, `electron-${version}`);
@@ -1713,12 +1715,36 @@ ipcMain.handle('manager.electron.download', async (_e, version) => {
     electronDownloadTasks.set(taskId, controller);
 
     try {
-        // 1. 下载 zip
-        await downloadFileWithProgress(url, tmpZip, (progress) => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('manager.electron.downloadProgress', { version, progress });
+        // 1. 测速选择最优镜像源
+        console.log('[main] download: probing mirrors for electron v%s', version);
+        const mirrors = await probeDownloadMirrors(version, platformKey, 3000);
+        const candidates = mirrors.length > 0
+            ? mirrors.map(m => ({ name: m.name, url: m.url }))
+            : urls;
+        console.log('[main] download: selected candidates:', candidates.map(c => c.name));
+
+        // 2. 逐个尝试下载，直到成功
+        let lastErr;
+        for (const candidate of candidates) {
+            try {
+                console.log('[main] download: trying %s: %s', candidate.name, candidate.url);
+                await downloadFileWithProgress(candidate.url, tmpZip, (progress) => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('manager.electron.downloadProgress', { version, progress });
+                    }
+                }, controller);
+                console.log('[main] download: success via %s', candidate.name);
+                break;
+            } catch (e) {
+                lastErr = e;
+                try { if (fs.existsSync(tmpZip)) fs.unlinkSync(tmpZip); } catch (_) {}
+                console.log('[main] download: %s failed: %s', candidate.name, e.message);
             }
-        }, controller);
+        }
+
+        if (lastErr && !fs.existsSync(tmpZip)) {
+            throw lastErr;
+        }
         electronDownloadTasks.delete(taskId);
 
         // zip 下载完成，进入解压安装阶段：通知前端 progress=100，
