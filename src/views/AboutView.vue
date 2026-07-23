@@ -230,7 +230,7 @@ async function doUpdate() {
                     </div>
                     <div class="info-row">
                         <span class="info-label">{{ $t('about.author') }}</span>
-                        <span class="info-value">rexlevin</span>
+                        <span class="info-value">canbox-io</span>
                     </div>
                 </div>
             </el-card>
