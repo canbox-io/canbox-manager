@@ -294,12 +294,23 @@ function readAppInfo(appId) {
                 break;
             }
         }
+
+        // 读取 .canbox-app 元数据获取 web URL（用于 launcher 关键词）
+        let webAppUrl = '';
+        try {
+            const meta = readCanboxMeta(appDir);
+            if (meta && meta.type === 'web' && meta.webApp && meta.webApp.url) {
+                webAppUrl = meta.webApp.url;
+            }
+        } catch (e) {}
+
         return {
             appId,
             name: pkg.displayName || pkg.name || appId,
             wmClass: pkg.name || appId,
             description: pkg.description || '',
-            logo
+            logo,
+            webAppUrl
         };
     } catch (e) {
         return null;

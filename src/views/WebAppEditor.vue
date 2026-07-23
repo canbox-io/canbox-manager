@@ -50,6 +50,52 @@ const form = reactive({
 
 const fetching = ref(false);
 const submitting = ref(false);
+const userEditedName = ref(false);
+
+// URL → 英文标识提取
+function extractDomainKeyword(urlString) {
+    if (!urlString) return null;
+    try {
+        const u = new URL(urlString);
+        const hostname = u.hostname;
+        const parts = hostname.split('.').filter(p => p);
+        parts.pop();
+        const commonPrefixes = ['www', 'm', 'mobile', 'app', 'api', 'docs', 'blog', 'shop'];
+        const meaningfulParts = parts.filter(p => !commonPrefixes.includes(p.toLowerCase()));
+        if (meaningfulParts.length === 0) return null;
+        const mainDomain = meaningfulParts[0];
+        return mainDomain.charAt(0).toUpperCase() + mainDomain.slice(1);
+    } catch (e) {
+        return null;
+    }
+}
+
+// 全中文检测
+function isAllChinese(str) {
+    if (!str) return false;
+    const clean = str.replace(/[\s\u3000-\u303f\uff00-\uffef]/g, '');
+    if (!clean) return false;
+    return /^[\u4e00-\u9fff]+$/.test(clean);
+}
+
+// 自动追加域名关键词到名称
+function autoAppendDomainKeyword() {
+    if (!form.url || userEditedName.value) return;
+    if (!isAllChinese(form.name)) return;
+    const keyword = extractDomainKeyword(form.url);
+    if (!keyword) return;
+    form.name = form.name + keyword;
+}
+
+// 名称输入框手动编辑检测
+function onNameInput() {
+    userEditedName.value = true;
+}
+
+// URL 变化时尝试自动追加
+watch(() => form.url, () => {
+    autoAppendDomainKeyword();
+});
 
 // 重置表单
 function resetForm() {
@@ -63,6 +109,7 @@ function resetForm() {
     form.manifestUrl = '';
     form.themeColor = '';
     form.bgColor = '';
+    userEditedName.value = false;
 }
 
 // 编辑模式：从 editApp 读取已存配置预填充
@@ -82,6 +129,8 @@ function loadFromEditApp() {
     form.manifestUrl = cfg.manifestUrl || '';
     form.themeColor = cfg.themeColor || '';
     form.bgColor = cfg.backgroundColor || '';
+    userEditedName.value = false;
+    autoAppendDomainKeyword();
 }
 
 watch(() => props.visible, (val) => {
@@ -111,7 +160,11 @@ async function handleFetchManifest() {
         const result = await appsStore.fetchManifest(url);
         if (result.success) {
             // 预填表单
-            if (result.name) form.name = result.name;
+            if (result.name) {
+                form.name = result.name;
+                userEditedName.value = false;
+                autoAppendDomainKeyword();
+            }
             if (result.icon) form.logo = result.icon;
             if (result.backgroundColor) form.bgColor = result.backgroundColor;
             if (result.themeColor) form.themeColor = result.themeColor;
@@ -218,7 +271,7 @@ async function handleSubmit() {
             </el-form-item>
 
             <el-form-item :label="$t('webApp.name')">
-                <el-input v-model="form.name" :placeholder="$t('webApp.namePlaceholder')" />
+                <el-input v-model="form.name" :placeholder="$t('webApp.namePlaceholder')" @input="onNameInput" />
             </el-form-item>
 
             <el-form-item :label="$t('webApp.logo')">

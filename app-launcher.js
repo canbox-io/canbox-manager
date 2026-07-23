@@ -13,6 +13,58 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execSync } = require('child_process');
+const { URL } = require('url');
+
+/**
+ * 从 URL 提取用于追加到显示名的英文标识
+ * 解析 hostname，去 TLD、去 www/m 等常见前缀，提取有意义的英文标识
+ * @param {string} urlString - 网页应用 URL
+ * @returns {string|null} 英文标识（如 'Wenxin'），提取失败返回 null
+ */
+function extractDomainKeyword(urlString) {
+    if (!urlString) return null;
+    try {
+        const parsed = new URL(urlString);
+        const hostname = parsed.hostname;
+        const parts = hostname.split('.').filter(p => p);
+
+        parts.pop(); // 去掉 TLD
+        const commonPrefixes = ['www', 'm', 'mobile', 'app', 'api', 'docs', 'blog', 'shop'];
+        const meaningfulParts = parts.filter(p => !commonPrefixes.includes(p.toLowerCase()));
+
+        if (meaningfulParts.length === 0) return null;
+
+        const mainDomain = meaningfulParts[0];
+        return mainDomain.charAt(0).toUpperCase() + mainDomain.slice(1);
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * 判断字符串是否全部为中文字符（不含标点/空格）
+ */
+function isAllChinese(str) {
+    if (!str) return false;
+    // 去掉空格和标点后检查是否全是中文
+    const clean = str.replace(/[\s\u3000-\u303f\uff00-\uffef]/g, '');
+    if (!clean) return false;
+    return /^[\u4e00-\u9fff]+$/.test(clean);
+}
+
+/**
+ * 解析 launcher 的显示名：全中文时追加英文标识
+ * @param {string} name - 原始名称
+ * @param {string} webAppUrl - 网页应用 URL
+ * @returns {string} 解析后的显示名
+ */
+function resolveDisplayName(name, webAppUrl) {
+    if (!webAppUrl || !name) return name;
+    if (!isAllChinese(name)) return name;
+    const keyword = extractDomainKeyword(webAppUrl);
+    if (!keyword) return name;
+    return name + keyword;
+}
 
 /**
  * 判断当前是否应写 launcher（仅生产模式）
@@ -100,6 +152,7 @@ function generateLauncher(appInfo, options) {
     const binPath = getBinLauncherPath();
     const args = `app ${appId}`;
     const iconPath = getIconPath(appId, appInfo.logo);
+    const displayName = resolveDisplayName(name, appInfo.webAppUrl);
 
     console.log('[app-launcher] 生成 APP launcher:', name, '路径:', launcherPath);
 
@@ -113,11 +166,11 @@ function generateLauncher(appInfo, options) {
             const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; $s.Arguments = '${args}'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
             execSync(cmd);
         } else {
-            // Linux: .desktop 文件，文件名带 canbox- 前缀，Name= 用纯 name（菜单显示纯名字）
+            // Linux: .desktop 文件，文件名带 canbox- 前缀，Name= 用解析后的显示名
             const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
             if (!fs.existsSync(applicationsPath)) fs.mkdirSync(applicationsPath, { recursive: true });
             const desktopFile = `[Desktop Entry]
-Name=${name}
+Name=${displayName}
 Comment=${description || ''}
 Exec="${binPath}" ${args}
 ${iconPath ? `Icon=${iconPath}` : ''}
@@ -254,5 +307,6 @@ module.exports = {
     getLauncherPath,
     generateLauncher,
     deleteLauncher,
-    generateManagerLauncher
+    generateManagerLauncher,
+    resolveDisplayName
 };
