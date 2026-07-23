@@ -862,10 +862,10 @@ function isBoundsVisible(bounds) {
 }
 
 const savedState = loadWindowState();
-const useSavedBounds = savedState && savedState.bounds && isBoundsVisible(savedState.bounds);
 
 let win;
 app.whenReady().then(() => {
+    const useSavedBounds = savedState && savedState.bounds && isBoundsVisible(savedState.bounds);
     const windowOptions = {
         backgroundColor: '${bgColor}',
         title: '${name}',
