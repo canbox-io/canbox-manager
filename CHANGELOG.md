@@ -4,6 +4,32 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.0] - 2026-07-23
+
+### feat | 新功能 / Features
+
+网页应用全中文名自动追加 URL 英文标识到显示名，支持在创建弹层中实时预览与编辑，确保系统快速启动工具可通过英文名搜索到
+
+Auto-append URL domain keyword to display name for Chinese-only web apps with real-time preview and editing in creation dialog, ensuring system launcher tools can search by English name
+
+### refactor | 重构 / Refactoring
+
+将 useSavedBounds 变量声明移至 app ready 回调内，优化窗口状态持久化初始化时机
+
+Move useSavedBounds variable declaration into app ready callback, optimize window state persistence initialization timing
+
+### chore | 维护 / Maintenance
+
+更新关于页面的作者信息为 canbox-io
+
+Update author info in About page to canbox-io
+
+### release | 发布 / Release
+
+将版本号从 0.1.9 升级至 0.2.0
+
+Bump version from 0.1.9 to 0.2.0
+
 ## [0.1.9] - 2026-07-22
 
 ### feat | 新功能 / Features
