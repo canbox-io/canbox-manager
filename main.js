@@ -824,7 +824,7 @@ function renderWebAppMainJs(config) {
 
     return `// 自动生成的 Canbox 网页应用 main.js
 // 由 canbox-manager web-app-creator 生成
-const { app, BrowserWindow, Menu, screen } = require('electron');
+const { app, BrowserWindow, Menu, screen, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -907,6 +907,15 @@ app.whenReady().then(() => {
     if (savedState && savedState.isFullScreen) win.setFullScreen(true);
 
     win.webContents.setUserAgent(CHROME_UA);
+
+    // 拦截新窗口打开：http/https 链接交由系统默认浏览器，禁止应用内新开 BrowserWindow
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            shell.openExternal(url);
+        }
+        return { action: 'deny' };
+    });
+
     win.loadURL('${url}');${shortcutSetup}${menuSetup}
 
     // 监听窗口变化，debounce 保存
