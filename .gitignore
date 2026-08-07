@@ -4,3 +4,7 @@ build/
 release/
 .env
 *.log
+
+# SEA build artifacts
+bin/canbox-sea/canbox.exe
+bin/canbox-sea/sea-prep.blob

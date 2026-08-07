@@ -759,6 +759,7 @@ function renderWebAppMainJs(config) {
     const bgColor = config.bgColor || '#ffffff';
     const url = config.url;
     const name = (config.name || '').replace(/'/g, "\\'");
+    const appId = (config.appId || '').replace(/'/g, "\\'");
     const menuBar = config.menuBar !== false;
 
     // 菜单模板（仅当 menuBar=true 时调用 setApplicationMenu）
@@ -826,6 +827,10 @@ function renderWebAppMainJs(config) {
 const { app, BrowserWindow, Menu, screen } = require('electron');
 const fs = require('fs');
 const path = require('path');
+
+// 设置 AppUserModelID（必须在 app.whenReady() 之前）
+// Windows 任务栏按此 ID 分组窗口，与其他 Canbox APP/manager 分开显示
+app.setAppUserModelId('com.canbox.web.${appId}');
 
 // Chrome UA 伪装（避免网站识别为非标准浏览器而限制功能）
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
@@ -988,6 +993,7 @@ async function createWebApp(config) {
 
         // 写 main.js
         const mainJsContent = renderWebAppMainJs({
+            appId,
             url: config.url,
             name: config.name,
             width: config.width,
@@ -1080,6 +1086,7 @@ async function editWebApp(appId, config) {
 
         // 覆盖写 main.js
         const mainJsContent = renderWebAppMainJs({
+            appId,
             url: config.url,
             name: config.name,
             width: config.width,

@@ -77,9 +77,10 @@ function shouldWriteLauncher() {
 /**
  * 获取 bin/canbox 启动器路径
  * 生产模式下 __dirname 是 {CANBOX_HOME}/manager/，bin/canbox 在 {CANBOX_HOME}/bin/
+ * Windows 下使用 Node SEA 编译的 canbox.exe，Linux 下使用 bash 脚本 canbox
  */
 function getBinLauncherPath() {
-    const ext = process.platform === 'win32' ? 'canbox.bat' : 'canbox';
+    const ext = process.platform === 'win32' ? 'canbox.exe' : 'canbox';
     return path.join(__dirname, '..', 'bin', ext);
 }
 
@@ -110,6 +111,9 @@ function getLauncherPath(appName) {
 
 /**
  * 获取图标缓存路径
+ * Windows: 生成 .ico（PNG-in-ICO，Vista+ 支持），.lnk 的 IconLocation 对 ICO 支持可靠
+ *          直接引用 PNG 在 Windows Shell 图标缓存中常无法正常显示
+ * Linux:   生成原始格式（png/svg）
  */
 function getIconPath(appId, logoDataUri) {
     if (!logoDataUri) return null;
@@ -120,13 +124,59 @@ function getIconPath(appId, logoDataUri) {
     const match = logoDataUri.match(/^data:image\/(\w+);base64,(.+)$/);
     if (!match) return null;
     const ext = match[1] === 'svg+xml' ? 'svg' : match[1];
-    const iconPath = path.join(iconDir, `${appId}.${ext}`);
+    const imgBuf = Buffer.from(match[2], 'base64');
+
     try {
-        fs.writeFileSync(iconPath, Buffer.from(match[2], 'base64'));
-        return iconPath;
+        if (process.platform === 'win32') {
+            // Windows: 生成 ICO（PNG-in-ICO 格式）
+            // SVG 无法直接放入 ICO，跳过（极少见，APP logo 一般是 PNG）
+            if (ext === 'svg') return null;
+            const icoPath = path.join(iconDir, `${appId}.ico`);
+            const icoBuf = pngToIco(imgBuf);
+            fs.writeFileSync(icoPath, icoBuf);
+            return icoPath;
+        } else {
+            const iconPath = path.join(iconDir, `${appId}.${ext}`);
+            fs.writeFileSync(iconPath, imgBuf);
+            return iconPath;
+        }
     } catch (e) {
         return null;
     }
+}
+
+/**
+ * 将 PNG 字节流封装为 ICO 文件（PNG-in-ICO 格式，Windows Vista+ 支持）
+ * ICO 结构: ICONDIR(6) + ICONDIRENTRY(16) + PNG data
+ */
+function pngToIco(pngBuf) {
+    // ICONDIR: reserved(2)=0, type(2)=1(ICO), count(2)=1
+    const header = Buffer.alloc(6);
+    header.writeUInt16LE(0, 0);  // reserved
+    header.writeUInt16LE(1, 2);  // type = ICO
+    header.writeUInt16LE(1, 4);  // count = 1
+
+    // ICONDIRENTRY (16 bytes)
+    // 从 PNG IHDR chunk 读取宽高（偏移 16: width 4字节, 20: height 4字节）
+    let width = 0, height = 0;
+    if (pngBuf.length >= 24 && pngBuf[0] === 0x89 && pngBuf[1] === 0x50) {
+        width = pngBuf.readUInt32BE(16);
+        height = pngBuf.readUInt32BE(20);
+        // ICO 中 0 表示 256
+        if (width === 256) width = 0;
+        if (height === 256) height = 0;
+    }
+    const entry = Buffer.alloc(16);
+    entry.writeUInt8(width & 0xFF, 0);     // width (0=256)
+    entry.writeUInt8(height & 0xFF, 1);    // height (0=256)
+    entry.writeUInt8(0, 2);                // colorCount (0=256色以上)
+    entry.writeUInt8(0, 3);                // reserved
+    entry.writeUInt16LE(1, 4);             // planes
+    entry.writeUInt16LE(32, 6);            // bitCount
+    entry.writeUInt32LE(pngBuf.length, 8); // bytesInRes
+    entry.writeUInt32LE(22, 12);           // imageOffset (6+16)
+
+    return Buffer.concat([header, entry, pngBuf]);
 }
 
 /**
@@ -161,9 +211,8 @@ function generateLauncher(appInfo, options) {
             // Windows: 确保 Canbox 子文件夹存在
             const canboxGroupPath = path.dirname(launcherPath);
             if (!fs.existsSync(canboxGroupPath)) fs.mkdirSync(canboxGroupPath, { recursive: true });
-            const escapedTarget = binPath.replace(/\\/g, '\\\\');
-            const escapedIcon = iconPath ? iconPath.replace(/\\/g, '\\\\') : '';
-            const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; $s.Arguments = '${args}'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
+            // 注意：PowerShell 单引号字符串中不需要转义反斜杠
+            const cmd = `powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath}'); $s.TargetPath = '${binPath}'; $s.Arguments = '${args}'; ${iconPath ? `$s.IconLocation = '${iconPath},0'; ` : ''}$s.Save()"`;
             execSync(cmd);
         } else {
             // Linux: .desktop 文件，文件名带 canbox- 前缀，Name= 用解析后的显示名
@@ -212,14 +261,35 @@ function deleteLauncher(appName) {
 
 /**
  * 获取 manager 自身 launcher 路径
+ * Windows: 放入 Canbox 子文件夹（与 NSIS installer 创建的路径一致），
+ *          避免在 Programs 根目录产生重复的 Canbox.lnk。
  */
 function getManagerLauncherPath() {
     if (process.platform === 'win32') {
-        const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
-        return path.join(programsPath, 'Canbox.lnk');
+        const canboxGroupPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Canbox');
+        return path.join(canboxGroupPath, 'Canbox.lnk');
     } else {
         const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
         return path.join(applicationsPath, 'canbox.desktop');
+    }
+}
+
+/**
+ * 清理旧的 manager launcher 孤儿文件
+ * 早期版本将 manager launcher 创建在 Programs 根目录（Canbox 子文件夹之外），
+ * NSIS installer 实际创建在 Canbox 子文件夹内，导致出现两个 Canbox.lnk。
+ * 此函数删除根目录下的孤儿，只保留子文件夹内的正确快捷方式。
+ */
+function cleanupOrphanManagerLauncher() {
+    if (process.platform !== 'win32') return;
+    const orphanPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Canbox.lnk');
+    try {
+        if (fs.existsSync(orphanPath)) {
+            fs.unlinkSync(orphanPath);
+            console.log('[app-launcher] 清理旧的 manager launcher 孤儿:', orphanPath);
+        }
+    } catch (e) {
+        // 清理失败不影响主流程
     }
 }
 
@@ -232,6 +302,9 @@ function generateManagerLauncher() {
     if (!shouldWriteLauncher()) {
         return { success: true, skipped: true };
     }
+
+    // 清理早期版本遗留在 Programs 根目录的孤儿 manager launcher
+    cleanupOrphanManagerLauncher();
 
     const launcherPath = getManagerLauncherPath();
 
@@ -271,9 +344,7 @@ function generateManagerLauncher() {
         if (process.platform === 'win32') {
             const programsPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs');
             if (!fs.existsSync(programsPath)) fs.mkdirSync(programsPath, { recursive: true });
-            const escapedTarget = binPath.replace(/\\/g, '\\\\');
-            const escapedIcon = iconPath ? iconPath.replace(/\\/g, '\\\\') : '';
-            const cmd = `powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath.replace(/\\/g, '\\\\')}'); $s.TargetPath = '${escapedTarget}'; $s.Arguments = 'manager'; ${iconPath ? `$s.IconLocation = '${escapedIcon},0'; ` : ''}$s.Save()"`;
+            const cmd = `powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${launcherPath}'); $s.TargetPath = '${binPath}'; $s.Arguments = 'manager'; ${iconPath ? `$s.IconLocation = '${iconPath},0'; ` : ''}$s.Save()"`;
             execSync(cmd);
         } else {
             const applicationsPath = path.join(os.homedir(), '.local', 'share', 'applications');
