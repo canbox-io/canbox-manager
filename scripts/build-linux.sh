@@ -59,7 +59,7 @@ echo "  canbox-core: 已复制（含 node_modules）"
 # 2c. 复制 manager 文件
 MANAGER_DIR="$STAGE_DIR/canbox/manager"
 mkdir -p "$MANAGER_DIR"
-cp main.js preload.js repo-probe.js app-launcher.js updater.js package.json "$MANAGER_DIR/"
+cp main.js preload.js repo-probe.js app-launcher.js updater.js catalog-manager.js package.json "$MANAGER_DIR/"
 cp -r build icons "$MANAGER_DIR/"
 cp logo.png logo.svg "$MANAGER_DIR/" 2>/dev/null || true
 # 复制 manager 主进程运行时依赖（adm-zip, nanoid, axios 及传递依赖）
