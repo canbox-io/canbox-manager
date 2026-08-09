@@ -28,6 +28,8 @@ import {
     ElSelect, ElOption, ElSwitch, ElInputNumber,
     ElDrawer, ElProgress,
     ElTable, ElTableColumn, ElAlert,
+    ElTabs, ElTabPane,
+    ElResult,
     ElLoading
 } from 'element-plus';
 
@@ -76,6 +78,9 @@ app.component('ElProgress', ElProgress);
 app.component('ElTable', ElTable);
 app.component('ElTableColumn', ElTableColumn);
 app.component('ElAlert', ElAlert);
+app.component('ElTabs', ElTabs);
+app.component('ElTabPane', ElTabPane);
+app.component('ElResult', ElResult);
 
 // v-loading 指令（Element Plus 的 Loading 指令）
 app.directive('loading', ElLoading.directive);

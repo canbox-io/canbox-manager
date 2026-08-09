@@ -81,6 +81,15 @@ const api = {
         settingsSet: (key, value) => ipcRenderer.invoke('manager.settings.set', key, value),
         settingsGetAll: () => ipcRenderer.invoke('manager.settings.getAll'),
 
+        // APP 目录（Catalog）
+        catalogListSources: () => ipcRenderer.invoke('manager.catalog.listSources'),
+        catalogAddSource: (name, url) => ipcRenderer.invoke('manager.catalog.addSource', { name, url }),
+        catalogRemoveSource: (sourceId) => ipcRenderer.invoke('manager.catalog.removeSource', sourceId),
+        catalogFetch: (sourceId, options) => ipcRenderer.invoke('manager.catalog.fetch', sourceId, options),
+        catalogGetCache: (sourceId) => ipcRenderer.invoke('manager.catalog.getCache', sourceId),
+        catalogGetReadme: (repoUrl) => ipcRenderer.invoke('manager.catalog.getReadme', repoUrl),
+        catalogGetRepoMarkdown: (repoUrl, filePath, branch) => ipcRenderer.invoke('manager.catalog.getRepoMarkdown', repoUrl, filePath, branch),
+
         // 文件任务（下载/安装 APP）
         fileTaskCreate: (task) => ipcRenderer.invoke('manager.fileTask.create', task),
         fileTaskCancel: (taskId) => ipcRenderer.invoke('manager.fileTask.cancel', taskId),

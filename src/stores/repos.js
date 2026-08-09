@@ -48,6 +48,22 @@ export const useReposStore = defineStore('repos', () => {
         }
     }
 
+    async function syncAllRepos() {
+        const ids = repos.value.map(r => r.id);
+        ids.forEach(id => { syncing.value[id] = true; });
+        try {
+            for (const id of ids) {
+                await window.api.manager.reposSync(id);
+            }
+            await fetchRepos();
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: e.message };
+        } finally {
+            ids.forEach(id => { syncing.value[id] = false; });
+        }
+    }
+
     async function installRepo(repoId) {
         installing.value[repoId] = true;
         installProgress.value[repoId] = 0;
@@ -77,6 +93,7 @@ export const useReposStore = defineStore('repos', () => {
         addRepo,
         removeRepo,
         syncRepo,
+        syncAllRepos,
         installRepo,
         getReadme
     };

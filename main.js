@@ -39,6 +39,8 @@ const CORE_PATH = global.__CANBOX_CORE_PATH__;
 const repoProbe = require('./repo-probe');
 const appLauncher = require('./app-launcher');
 const updater = require('./updater');
+const catalogManager = require('./catalog-manager');
+catalogManager.setUserData(env.userData);
 const { readCanboxMeta, writeCanboxMeta, createWebMeta } = require(path.join(CORE_PATH, 'lib', 'canbox-meta'));
 const { resolveElectron } = require(path.join(CORE_PATH, 'lib', 'electron-selector'));
 
@@ -100,6 +102,9 @@ function getManagerStore() {
     const store = require(path.join(CORE_PATH, 'lib', 'store'));
     return store.getStore('canbox-manager', 'apps', path.join(USERS_PATH, 'data'));
 }
+
+// Catalog 自定义源配置复用 manager store 持久化
+catalogManager.bind(getManagerStore());
 
 ipcMain.handle('manager.apps.list', async () => {
     const appsDir = path.join(USERS_PATH, 'apps');
@@ -916,6 +921,15 @@ app.whenReady().then(() => {
         return { action: 'deny' };
     });
 
+    // 拦截主窗口内的整页跳转（例如 README 中未被渲染层拦截的普通链接），
+    // 交由系统默认浏览器打开，避免 manager 主界面被外链覆盖。
+    win.webContents.on('will-navigate', (event, url) => {
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            event.preventDefault();
+            shell.openExternal(url);
+        }
+    });
+
     win.loadURL('${url}');${shortcutSetup}${menuSetup}
 
     // 监听窗口变化，debounce 保存
@@ -1407,6 +1421,56 @@ ipcMain.handle('manager.settings.getAll', async () => {
     const settingsStore = store.getStore('canbox-manager', 'settings', path.join(USERS_PATH, 'data'));
     // electron-store 的 store 没有直接 getAll，用 size + 遍历
     return settingsStore.store || {};
+});
+
+// -- APP 目录（Catalog）--
+
+ipcMain.handle('manager.catalog.listSources', async () => {
+    return catalogManager.listSources();
+});
+
+ipcMain.handle('manager.catalog.addSource', async (_e, { name, url }) => {
+    return catalogManager.addCustomSource(name, url);
+});
+
+ipcMain.handle('manager.catalog.removeSource', async (_e, sourceId) => {
+    return catalogManager.removeSource(sourceId);
+});
+
+ipcMain.handle('manager.catalog.fetch', async (_e, sourceId, options) => {
+    try {
+        return await catalogManager.fetchCatalog(sourceId, options || {});
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('manager.catalog.getCache', async (_e, sourceId) => {
+    const cached = catalogManager.readCachedCatalog(sourceId);
+    const meta = cached.meta || catalogManager.readCacheMeta(sourceId);
+    return {
+        success: true,
+        cached: cached.cached,
+        apps: cached.apps,
+        partialFailed: cached.partialFailed,
+        meta
+    };
+});
+
+ipcMain.handle('manager.catalog.getReadme', async (_e, repoUrl) => {
+    try {
+        return await catalogManager.getReadme(repoUrl);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('manager.catalog.getRepoMarkdown', async (_e, repoUrl, filePath, branch) => {
+    try {
+        return await catalogManager.getRepoMarkdown(repoUrl, filePath, branch);
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
 });
 
 // -- 数据目录管理（读取/迁移 Users 目录，由 canbox-core env.js 读取 config.json 生效）--
@@ -2112,6 +2176,17 @@ app.whenReady().then(() => {
                 mainWindow.webContents.send('manager.apps.updatesAvailable', result.updates);
             }
         }).catch(() => {});
+    }, 30000);
+
+    // 启动 30s 后后台预热内置 Catalog 源（不阻塞启动、失败静默）
+    setTimeout(() => {
+        try {
+            for (const source of catalogManager.listSources()) {
+                catalogManager.fetchCatalog(source.id, { force: false }).catch(() => {});
+            }
+        } catch (e) {
+            // 静默忽略
+        }
     }, 30000);
 });
 

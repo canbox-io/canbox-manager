@@ -643,8 +643,8 @@ async function installDeveloper() {
     padding: 24px;
     overflow-y: auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 12px;
     align-content: start;
 }
 
@@ -652,7 +652,7 @@ async function installDeveloper() {
     background: var(--el-fill-color-light);
     border-radius: 12px;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-    padding: 20px;
+    padding: 16px;
     display: flex;
     align-items: flex-start;
     transition: box-shadow 0.2s;
@@ -670,26 +670,26 @@ async function installDeveloper() {
     flex-shrink: 0;
 }
 .logo-section img {
-    width: 72px;
-    height: 72px;
-    border-radius: 12px;
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
     object-fit: cover;
 }
 .logo-placeholder {
-    width: 72px;
-    height: 72px;
-    border-radius: 12px;
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 36px;
+    font-size: 28px;
     background: var(--el-fill-color-darker);
 }
 
 /* 信息区域 */
 .info-section {
     flex: 1;
-    margin-left: 16px;
+    margin-left: 14px;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -697,16 +697,17 @@ async function installDeveloper() {
 .name-row {
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 .app-name {
-    font-size: 19px;
+    font-size: 16px;
     font-weight: 600;
     color: var(--el-text-color-primary);
 }
 .app-version {
     color: var(--el-text-color-regular);
-    font-size: 15px;
+    font-size: 13px;
 }
 
 /* 网页/PWA 类型角标 */
@@ -733,12 +734,12 @@ async function installDeveloper() {
 .update-badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    padding: 1px 6px;
     background: var(--el-color-warning-light-9);
     color: var(--el-color-warning-dark-2);
     border: 1px solid var(--el-color-warning-light-5);
     border-radius: 10px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
@@ -750,12 +751,12 @@ async function installDeveloper() {
 .electron-missing-badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    padding: 1px 6px;
     background: var(--el-color-danger-light-9);
     color: var(--el-color-danger-dark-2);
     border: 1px solid var(--el-color-danger-light-5);
     border-radius: 10px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
 }
 .downloading-electron {
@@ -766,11 +767,11 @@ async function installDeveloper() {
 .platforms {
     margin-left: auto;
     display: flex;
-    gap: 6px;
+    gap: 4px;
 }
 .platform-icon {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -783,8 +784,8 @@ async function installDeveloper() {
 }
 .app-desc {
     color: var(--el-text-color-primary);
-    font-size: 16px;
-    margin-top: 6px;
+    font-size: 13px;
+    margin-top: 4px;
     line-height: 1.5;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -792,8 +793,8 @@ async function installDeveloper() {
 }
 .app-id {
     color: var(--el-text-color-placeholder);
-    font-size: 13px;
-    margin-top: 4px;
+    font-size: 12px;
+    margin-top: 2px;
     font-family: monospace;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -806,28 +807,28 @@ async function installDeveloper() {
     margin-top: 6px;
 }
 .keyword-tag {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--el-text-color-secondary);
     background: var(--el-fill-color-darker);
     border-radius: 4px;
-    padding: 2px 8px;
+    padding: 1px 6px;
 }
 
 /* 操作按钮 */
 .app-actions {
     display: flex;
-    gap: 10px;
-    margin-top: 12px;
+    gap: 8px;
+    margin-top: 10px;
 }
 
 .icon-btn {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     border: none;
     background: var(--el-fill-color);
-    border-radius: 8px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 18px;
+    font-size: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
