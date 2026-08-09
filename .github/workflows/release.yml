@@ -129,15 +129,45 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Verify NSIS available
+      - name: Ensure NSIS available
         shell: pwsh
         run: |
-          $nsis = Get-Command makensis -ErrorAction SilentlyContinue
-          if (-not $nsis) {
-            Write-Error "makensis not found on windows-latest image (should be preinstalled)"
+          # windows-latest (windows-2025) no longer ships NSIS preinstalled,
+          # so check PATH + common locations and install via chocolatey if missing.
+          $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $makensis) {
+            $candidates = @(
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "$env:LOCALAPPDATA\Programs\NSIS\makensis.exe"
+            )
+            foreach ($c in $candidates) {
+              if (Test-Path $c) { $makensis = $c; break }
+            }
+          }
+
+          if (-not $makensis) {
+            Write-Host "NSIS not found, installing via chocolatey..."
+            $nsisExe = "C:\Program Files (x86)\NSIS\makensis.exe"
+            foreach ($attempt in 1..3) {
+              choco install nsis -y --no-progress
+              if (Test-Path $nsisExe) { $makensis = $nsisExe; break }
+              Write-Host "makensis.exe not found after attempt $attempt/3"
+              if ($attempt -lt 3) { Start-Sleep -Seconds (30 * $attempt) }
+            }
+          }
+
+          if (-not $makensis -or -not (Test-Path $makensis)) {
+            Write-Error "makensis.exe not found - NSIS install failed after retries"
             exit 1
           }
-          Write-Host "NSIS path: $($nsis.Source)"
+
+          # Expose makensis to subsequent steps (build-win.bat also has fallback)
+          $nsisDir = Split-Path $makensis
+          if ($env:PATH -notlike "*$nsisDir*") {
+            "$nsisDir" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+          Write-Host "Using makensis: $makensis"
 
       - name: Detect optimal npm registry
         shell: pwsh
