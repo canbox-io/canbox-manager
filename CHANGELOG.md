@@ -4,6 +4,36 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.1] - 2026-08-09
+
+### feat | 新功能 / Features
+
+新增应用目录（Catalog）功能，支持数据源管理与目录拉取
+拦截新窗口打开，http/https 链接交由系统默认浏览器处理
+完成 Windows 11 平台适配（本版本重点），并在 Windows 下使用 Node SEA 技术作为程序启动器，优化安装与图标处理
+
+Add Catalog feature with data source management and catalog fetching
+Intercept new window opens, open http/https links via system default browser
+Complete Windows 11 platform adaptation (key focus of this release), use Node SEA as Windows program launcher, optimize installation and icon handling
+
+### fix | 问题修复 / Bug Fixes
+
+禁用窗口拼写检查功能
+
+Disable window spell check
+
+### ci | CI / CI
+
+新增 Windows 构建与发布工作流
+
+Add Windows build and release workflow
+
+### chore | 维护 / Maintenance
+
+升级版本至 0.2.1 并添加 Node.js 引擎版本要求
+
+Bump version to 0.2.1 and add Node.js engine version requirement
+
 ## [0.2.0] - 2026-07-23
 
 ### feat | 新功能 / Features
