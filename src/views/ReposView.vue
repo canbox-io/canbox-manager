@@ -754,24 +754,32 @@ const searchTotal = computed(() =>
                             <span class="install-progress-label">{{ reposStore.installProgress[repo.id] }}%</span>
                         </div>
                         <div class="repo-actions">
-                            <el-button size="small" type="primary" :loading="reposStore.installing[repo.id]" @click="handleInstall(repo)">
-                                {{ $t('repos.install') }}
-                            </el-button>
-                            <el-button size="small" :loading="reposStore.syncing[repo.id]" @click="handleSync(repo)">
-                                ↻ {{ $t('repos.sync') }}
-                            </el-button>
-                            <el-button v-if="repo.installedAppId" size="small" type="success" @click="handleLaunch(repo)">
-                                {{ $t('repos.launch') }}
-                            </el-button>
-                            <el-button size="small" @click="openRepoReadme(repo)">
-                                {{ $t('repos.viewReadme') }}
-                            </el-button>
-                            <el-button size="small" @click="openExternal(repo.url)" title="GitHub">
-                                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" style="vertical-align: middle;"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-                            </el-button>
-                            <el-button size="small" type="danger" text @click="handleRemove(repo)">
-                                {{ $t('repos.remove') }}
-                            </el-button>
+                            <el-tooltip :content="$t('repos.install')" placement="top">
+                                <button class="icon-btn install-btn" :disabled="reposStore.installing[repo.id]" @click="handleInstall(repo)">
+                                    <span v-if="reposStore.installing[repo.id]" class="mini-spinner"></span>
+                                    <span v-else>⬇️</span>
+                                </button>
+                            </el-tooltip>
+                            <el-tooltip :content="$t('repos.sync')" placement="top">
+                                <button class="icon-btn sync-btn" :disabled="reposStore.syncing[repo.id]" @click="handleSync(repo)">
+                                    <span v-if="reposStore.syncing[repo.id]" class="mini-spinner"></span>
+                                    <span v-else>🔄</span>
+                                </button>
+                            </el-tooltip>
+                            <el-tooltip v-if="repo.installedAppId" :content="$t('repos.launch')" placement="top">
+                                <button class="icon-btn launch-btn" @click="handleLaunch(repo)">▶️</button>
+                            </el-tooltip>
+                            <el-tooltip :content="$t('repos.viewReadme')" placement="top">
+                                <button class="icon-btn readme-btn" @click="openRepoReadme(repo)">📄</button>
+                            </el-tooltip>
+                            <el-tooltip content="GitHub" placement="top">
+                                <button class="icon-btn github-btn" @click="openExternal(repo.url)" aria-label="GitHub">
+                                    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                                </button>
+                            </el-tooltip>
+                            <el-tooltip :content="$t('repos.remove')" placement="top">
+                                <button class="icon-btn delete-btn" @click="handleRemove(repo)">🗑️</button>
+                            </el-tooltip>
                         </div>
                     </div>
                 </div>
@@ -825,15 +833,17 @@ const searchTotal = computed(() =>
                                 <el-tag v-for="tag in app.tags.slice(0, 4)" :key="tag" size="small" type="info" effect="plain" round>{{ tag }}</el-tag>
                             </div>
                             <div class="repo-actions">
-                                <el-button size="small" type="primary" @click="handleInstallFromCatalog(app)">
-                                    ⬇ {{ $t('catalog.installFromCatalog') }}
-                                </el-button>
-                                <el-button size="small" @click="openCatalogAppReadme(app)">
-                                    📄 {{ $t('catalog.viewReadme') }}
-                                </el-button>
-                                <el-button size="small" @click="openExternal(app.repo)">
-                                    🔗
-                                </el-button>
+                                <el-tooltip :content="$t('catalog.installFromCatalog')" placement="top">
+                                    <button class="icon-btn install-btn" @click="handleInstallFromCatalog(app)">⬇️</button>
+                                </el-tooltip>
+                                <el-tooltip :content="$t('catalog.viewReadme')" placement="top">
+                                    <button class="icon-btn readme-btn" @click="openCatalogAppReadme(app)">📄</button>
+                                </el-tooltip>
+                                <el-tooltip content="GitHub" placement="top">
+                                    <button class="icon-btn github-btn" @click="openExternal(app.repo)" aria-label="GitHub">
+                                        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                                    </button>
+                                </el-tooltip>
                             </div>
                         </div>
                     </div>
@@ -996,7 +1006,7 @@ const searchTotal = computed(() =>
     padding: 20px 24px;
     overflow-y: auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
     gap: 12px;
     align-content: start;
 }
@@ -1134,8 +1144,63 @@ const searchTotal = computed(() =>
 
 .repo-actions {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     flex-wrap: wrap;
+}
+
+/* 图标按钮（与 AppsView 保持一致，避免多语言下文字按钮拉宽） */
+.icon-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: var(--el-fill-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 0;
+    line-height: 1;
+}
+
+.icon-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.icon-btn:active {
+    transform: translateY(0);
+}
+
+.icon-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+    transform: none;
+    box-shadow: none;
+}
+
+.install-btn:hover { background: var(--el-color-success-light-9); }
+.sync-btn:hover { background: var(--el-color-primary-light-9); }
+.launch-btn:hover { background: var(--el-color-success-light-9); }
+.readme-btn:hover { background: var(--el-color-primary-light-9); }
+.github-btn:hover { background: var(--el-color-primary-light-9); }
+.delete-btn:hover { background: var(--el-color-danger-light-9); }
+
+/* 小型旋转 spinner（安装/同步中） */
+.mini-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--el-color-primary-light-5);
+    border-top-color: var(--el-color-primary);
+    border-radius: 50%;
+    animation: repo-mini-spin 0.8s linear infinite;
+}
+
+@keyframes repo-mini-spin {
+    to { transform: rotate(360deg); }
 }
 
 .catalog-desc {
