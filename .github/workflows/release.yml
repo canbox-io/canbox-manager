@@ -257,8 +257,8 @@ jobs:
           # tag 形如 v0.1.2，CHANGELOG.md 中是 ## [0.1.2]，去掉 v 前缀
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           $content = Get-Content CHANGELOG.md -Raw
-          # 匹配 ## [版本号] 到下一个 ## [ 之间
-          $pattern = "(?s)## \[$([regex]::Escape($version))\].*?(?=^## \[|\z)"
+          # 匹配 ## [版本号] 到下一个 ## [ 之间（(?m) 让 ^ 匹配行首，(?s) 让 . 匹配换行）
+          $pattern = "(?ms)## \[$([regex]::Escape($version))\].*?(?=^## \[|\z)"
           if ($content -match $pattern) {
             $matches[0] | Out-File -FilePath changelog-extract.md -Encoding utf8
           } else {
