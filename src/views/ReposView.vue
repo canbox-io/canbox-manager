@@ -175,6 +175,14 @@ function getPlatforms(repo) {
     return repo.platforms && repo.platforms.length > 0 ? repo.platforms : ['windows', 'darwin', 'linux'];
 }
 
+// 默认组（reposStore.repos）的 logo 已外置为二进制文件（store/repos-logos/{repoId}.{ext}），
+// 通过自定义协议 canbox-repo-logo 读取；catalog 组仍用 app.logo（data URI/URL），不变。
+function repoLogoSrc(repo) {
+    return repo && repo.logoExt && repo.id
+        ? `canbox-repo-logo://local/${repo.id}.${repo.logoExt}`
+        : '';
+}
+
 let removeProgressListener = null;
 
 onMounted(async () => {
@@ -619,7 +627,7 @@ const searchTotal = computed(() =>
                         <div v-for="item in g.items" :key="g.key + '-' + (item.id || item.repo)" class="repo-card">
                             <!-- 默认源仓库卡片 -->
                             <template v-if="g.type === 'repos'">
-                                <img v-if="item.logo" :src="item.logo" class="repo-logo" alt="logo" />
+                                <img v-if="item.logoExt" :src="repoLogoSrc(item)" class="repo-logo" alt="logo" />
                                 <div v-else class="repo-logo-placeholder">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="26" height="26"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" /></svg>
                                 </div>
@@ -737,7 +745,7 @@ const searchTotal = computed(() =>
             <!-- 默认源：用户仓库列表 -->
             <template v-if="isDefault">
                 <div v-for="repo in reposStore.repos" :key="repo.id" class="repo-card">
-                    <img v-if="repo.logo" :src="repo.logo" class="repo-logo" alt="logo" />
+                    <img v-if="repo.logoExt" :src="repoLogoSrc(repo)" class="repo-logo" alt="logo" />
                     <div v-else class="repo-logo-placeholder">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="26" height="26"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" /></svg>
                     </div>

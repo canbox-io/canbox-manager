@@ -18,7 +18,7 @@ if (process.env.NODE_ENV === 'development') {
 
 console.time('[startup] main.js 模块加载到 window-ready 总耗时');
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, protocol } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -29,6 +29,14 @@ const { customAlphabet } = require('nanoid');
 
 // 自动禁用 sandbox（某些 Linux 环境下 sandbox 无法工作）
 app.commandLine.appendSwitch('no-sandbox');
+
+// 注册 canbox-repo-logo 自定义协议为特权 scheme（必须在 app.whenReady 之前）。
+// 用于渲染端 <img src="canbox-repo-logo://local/{repoId}.{ext}"> 直接读取外置的 logo 二进制文件，
+// 避免 base64 data URI 内联进 repos.json 造成存储膨胀。
+protocol.registerSchemesAsPrivileged([{
+    scheme: 'canbox-repo-logo',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+}]);
 
 // canbox-core 的 injection.js 通过 electron -r 参数预加载，
 // 已完成环境初始化和 API 注册，通过 global 挂载 env 和 corePath。
@@ -1193,6 +1201,59 @@ function saveAllRepos(repos) {
     getReposStore().set('repos', repos);
 }
 
+// ====== repos 表外置资产（logo / readme）======
+// repos.json 只存仓库元数据；logo（二进制）与 readme（文本）外置到 store/ 下的
+// repos-logos/ 与 repos-readmes/ 子目录，与 repos 表平级，仅供 repos 表使用。
+// repo 对象只保留 logoExt（'png'|'svg'|...|null）与 readmeExt（'md'|null）。
+const REPOS_LOGOS_DIR = path.join(USERS_PATH, 'data', 'canbox-manager', 'store', 'repos-logos');
+const REPOS_READMES_DIR = path.join(USERS_PATH, 'data', 'canbox-manager', 'store', 'repos-readmes');
+
+function ensureAssetDir(dir) {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+}
+
+function getLogoPath(repoId, ext) {
+    return path.join(REPOS_LOGOS_DIR, `${repoId}.${ext || 'png'}`);
+}
+
+function getReadmePath(repoId) {
+    return path.join(REPOS_READMES_DIR, `${repoId}.md`);
+}
+
+// 写入 logo 二进制；先清理同 repoId 的其它扩展名旧文件（logo 扩展名可能变更）
+function writeRepoLogo(repoId, buf, ext) {
+    ensureAssetDir(REPOS_LOGOS_DIR);
+    deleteRepoAsset(REPOS_LOGOS_DIR, repoId);
+    fs.writeFileSync(getLogoPath(repoId, ext || 'png'), buf);
+}
+
+function writeRepoReadme(repoId, text) {
+    ensureAssetDir(REPOS_READMES_DIR);
+    fs.writeFileSync(getReadmePath(repoId), text || '', 'utf-8');
+}
+
+// 删除目录下属于指定 repoId 的所有文件（logo 扩展名可能变化，故按前缀遍历）
+function deleteRepoAsset(dir, repoId) {
+    if (!fs.existsSync(dir)) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir); } catch (_) { return; }
+    const prefix = repoId + '.';
+    for (const name of entries) {
+        if (!name.startsWith(prefix)) continue;
+        try { fs.rmSync(path.join(dir, name), { force: true }); } catch (_) {}
+    }
+}
+
+function deleteRepoLogo(repoId) {
+    deleteRepoAsset(REPOS_LOGOS_DIR, repoId);
+}
+
+function deleteRepoReadme(repoId) {
+    try { fs.rmSync(getReadmePath(repoId), { force: true }); } catch (_) {}
+}
+
 // -- 统一下载追踪表（catalog-repos.json）--
 // 三组数据来源（默认组 / 内置仓库源 / 自定义仓库源）的下载动作副产物，
 // 以 repoUrl 为公共主键，记录 probe 结果与安装追踪。与 repos.json 平级独立。
@@ -1382,10 +1443,19 @@ ipcMain.handle('manager.repos.add', async (_e, url) => {
             return { success: false, error: 'duplicate_url', repo: existed };
         }
 
-        // 探测仓库元数据
-        const probed = await repoProbe.probeRepo(url);
+        // 探测仓库元数据（含 logo 二进制 + README 文本）
+        const probed = await repoProbe.probeRepo(url, { withAssets: true });
 
         const repoId = `repo_${Date.now()}`;
+
+        // logo / readme 外置为文件，repos.json 只保留扩展名（避免 base64 内联膨胀）
+        if (probed.logoBuf && probed.logoExt) {
+            writeRepoLogo(repoId, probed.logoBuf, probed.logoExt);
+        }
+        if (probed.readme) {
+            writeRepoReadme(repoId, probed.readme);
+        }
+
         const repo = {
             id: repoId,
             url,
@@ -1395,11 +1465,11 @@ ipcMain.handle('manager.repos.add', async (_e, url) => {
             version: probed.version,
             description: probed.description,
             author: probed.author,
-            logo: probed.logo,
+            logoExt: probed.logoExt || null,
             keywords: probed.keywords,
             platforms: probed.platforms,
             branch: probed.branch,
-            readme: probed.readme,
+            readmeExt: probed.readme ? 'md' : null,
             lastError: null,
             createdAt: Date.now(),
             updatedAt: Date.now()
@@ -1420,6 +1490,9 @@ ipcMain.handle('manager.repos.remove', async (_e, repoId) => {
         const repos = getAllRepos();
         delete repos[repoId];
         saveAllRepos(repos);
+        // 清理外置资产文件（logo / readme）
+        deleteRepoLogo(repoId);
+        deleteRepoReadme(repoId);
         return { success: true };
     } catch (e) {
         return { success: false, error: e.message };
@@ -1434,7 +1507,7 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             return { success: false, error: '仓库不存在' };
         }
 
-        const probed = await repoProbe.probeRepo(repo.url);
+        const probed = await repoProbe.probeRepo(repo.url, { withAssets: true });
 
         // repos 表只存仓库元数据；安装追踪由 catalog-repos.json 追踪表接管。
         // 同步时若追踪表已有该 repoUrl 的记录，顺带刷新其 version/lastProbeAt（用于已下载徽标对比）
@@ -1445,7 +1518,19 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             saveCatalogRepoRecord(repo.url, existingRecord);
         }
 
-        repos[repoId] = {
+        // logo / readme 外置资产：有则覆盖写，无则清理旧文件（上游可能删了 logo/readme）
+        if (probed.logoBuf && probed.logoExt) {
+            writeRepoLogo(repoId, probed.logoBuf, probed.logoExt);
+        } else {
+            deleteRepoLogo(repoId);
+        }
+        if (probed.readme) {
+            writeRepoReadme(repoId, probed.readme);
+        } else {
+            deleteRepoReadme(repoId);
+        }
+
+        const updated = {
             ...repo,
             appId: probed.id,
             name: probed.name,
@@ -1453,14 +1538,18 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             version: probed.version,
             description: probed.description,
             author: probed.author,
-            logo: probed.logo,
+            logoExt: probed.logoExt || null,
             keywords: probed.keywords,
             platforms: probed.platforms,
             branch: probed.branch,
-            readme: probed.readme,
+            readmeExt: probed.readme ? 'md' : null,
             lastError: null,
             updatedAt: Date.now()
         };
+        // 清除迁移期可能残留的旧内联字段
+        delete updated.logo;
+        delete updated.readme;
+        repos[repoId] = updated;
         saveAllRepos(repos);
 
         return { success: true, repo: repos[repoId] };
@@ -1481,7 +1570,21 @@ ipcMain.handle('manager.repos.getReadme', async (_e, repoId) => {
         const repos = getAllRepos();
         const repo = repos[repoId];
         if (!repo) return { success: false, error: '仓库不存在' };
-        return { success: true, readme: repo.readme || '', version: repo.version };
+        // 兼容迁移期：若仍有内联 readme（旧版可能是 { text, statusCode, networkError } 对象），直接返回
+        if (typeof repo.readme === 'string' && repo.readme.length > 0) {
+            return { success: true, readme: repo.readme, version: repo.version };
+        }
+        if (repo.readme && typeof repo.readme.text === 'string' && repo.readme.text.length > 0) {
+            return { success: true, readme: repo.readme.text, version: repo.version };
+        }
+        if (repo.readmeExt) {
+            const readmePath = getReadmePath(repoId);
+            if (fs.existsSync(readmePath)) {
+                const readme = fs.readFileSync(readmePath, 'utf-8');
+                return { success: true, readme, version: repo.version };
+            }
+        }
+        return { success: true, readme: '', version: repo.version };
     } catch (e) {
         return { success: false, error: e.message };
     }
@@ -2265,6 +2368,39 @@ console.time('[startup] 等待 app.whenReady');
 app.whenReady().then(() => {
     console.timeEnd('[startup] 等待 app.whenReady');
     Menu.setApplicationMenu(null);
+
+    // 注册 canbox-repo-logo 协议处理器：渲染端 <img src="canbox-repo-logo://local/{repoId}.{ext}">
+    // 直接从 store/repos-logos/ 读取二进制，不经 base64，不进 repos.json。
+    protocol.handle('canbox-repo-logo', (request) => {
+        let url;
+        try { url = new URL(request.url); } catch (_) {
+            return new Response('Bad URL', { status: 400 });
+        }
+        const fileName = (url.pathname || '').replace(/^\/+/, '');
+        const dotIdx = fileName.lastIndexOf('.');
+        if (dotIdx <= 0) return new Response('Not Found', { status: 404 });
+        const repoId = fileName.slice(0, dotIdx);
+        const ext = fileName.slice(dotIdx + 1).toLowerCase();
+        // 安全校验：repoId 字符集白名单（防路径穿越），且必须存在于 repos 表、logoExt 一致
+        if (!/^[a-zA-Z0-9_-]+$/.test(repoId)) return new Response('Not Found', { status: 404 });
+        const repo = getAllRepos()[repoId];
+        if (!repo || !repo.logoExt || repo.logoExt.toLowerCase() !== ext) {
+            return new Response('Not Found', { status: 404 });
+        }
+        const filePath = getLogoPath(repoId, repo.logoExt);
+        if (!fs.existsSync(filePath)) return new Response('Not Found', { status: 404 });
+        try {
+            const buf = fs.readFileSync(filePath);
+            const mime = ext === 'svg' ? 'image/svg+xml' : (ext === 'png' ? 'image/png' : 'image/jpeg');
+            return new Response(buf, {
+                status: 200,
+                headers: { 'Content-Type': mime, 'Cache-Control': 'no-cache' }
+            });
+        } catch (e) {
+            return new Response('Read error', { status: 500 });
+        }
+    });
+
     // 生产模式下生成 manager 自身 launcher（已存在则跳过）
     appLauncher.generateManagerLauncher();
     createWindow();

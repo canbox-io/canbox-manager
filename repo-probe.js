@@ -255,10 +255,20 @@ async function fetchBuffer(url) {
 
 /**
  * 探测仓库元数据
- * @returns {Promise<Object>} { name, version, description, logo, keywords, platforms, branch, readme, author }
+ *
+ * @param {string} repoUrl - 仓库 URL
+ * @param {Object} [options]
+ * @param {boolean} [options.withAssets=false] - 是否拉取 logo（二进制）与 README 文本。
+ *        addRepo/syncRepo 等需要展示元数据的场景传 true；update-check/installByRepoUrl
+ *        内部 probe 仅用于取 version/id，传 false 可省掉两次无谓的 HTTP 请求。
+ * @returns {Promise<Object>} { name, version, description, logoBuf, logoExt, keywords, platforms, branch, readme, author }
+ *          - logoBuf: Buffer | null（仅 withAssets=true 时拉取）
+ *          - logoExt: 'png'|'svg'|'jpg'|... | null
+ *          - readme: string | null（仅 withAssets=true 时拉取）
  */
-async function probeRepo(repoUrl) {
-    console.log('[repo-probe] probeRepo start: url=%s', repoUrl);
+async function probeRepo(repoUrl, options = {}) {
+    const withAssets = !!options.withAssets;
+    console.log('[repo-probe] probeRepo start: url=%s withAssets=%s', repoUrl, withAssets);
     const branch = await detectDefaultBranch(repoUrl);
     console.log('[repo-probe] probeRepo: branch=%s', branch);
 
@@ -296,24 +306,28 @@ async function probeRepo(repoUrl) {
     }
     console.log('[repo-probe] probeRepo: pkg id=%s name=%s version=%s', pkg.id, pkg.name, pkg.version);
 
-    // logo
-    let logo = null;
-    const logoFile = pkg.logo || 'logo.png';
-    const logoUrl = getRawUrl(repoUrl, branch, logoFile);
-    const logoBuf = await fetchBuffer(logoUrl);
-    if (logoBuf) {
-        const ext = path.extname(logoFile).slice(1).toLowerCase();
-        const mime = ext === 'svg' ? 'image/svg+xml' : (ext === 'png' ? 'image/png' : 'image/jpeg');
-        logo = `data:${mime};base64,${logoBuf.toString('base64')}`;
-        console.log('[repo-probe] probeRepo: logo loaded, size=%d', logoBuf.length);
-    } else {
-        console.log('[repo-probe] probeRepo: logo not found: %s', logoUrl);
-    }
+    // logo / readme 仅在需要展示元数据时拉取，避免 update-check 等场景无谓的网络请求
+    let logoBuf = null;
+    let logoExt = null;
+    let readme = null;
+    if (withAssets) {
+        const logoFile = pkg.logo || 'logo.png';
+        const logoUrl = getRawUrl(repoUrl, branch, logoFile);
+        logoBuf = await fetchBuffer(logoUrl);
+        if (logoBuf) {
+            logoExt = path.extname(logoFile).slice(1).toLowerCase() || 'png';
+            console.log('[repo-probe] probeRepo: logo loaded, size=%d ext=%s', logoBuf.length, logoExt);
+        } else {
+            console.log('[repo-probe] probeRepo: logo not found: %s', logoUrl);
+        }
 
-    // README
-    const readmeUrl = getRawUrl(repoUrl, branch, 'README.md');
-    const readme = await fetchText(readmeUrl);
-    console.log('[repo-probe] probeRepo: readme length=%s', readme ? readme.length : 0);
+        const readmeUrl = getRawUrl(repoUrl, branch, 'README.md');
+        const readmeResult = await fetchText(readmeUrl);
+        // fetchText 返回 { text, statusCode, networkError }；只取 text 字符串，
+        // 避免把整个对象塞进 repos.json（旧版 bug 曾导致 readme 节点变成 object）
+        readme = (readmeResult && typeof readmeResult.text === 'string') ? readmeResult.text : null;
+        console.log('[repo-probe] probeRepo: readme length=%s', readme ? readme.length : 0);
+    }
 
     console.log('[repo-probe] probeRepo done: id=%s name=%s', pkg.id, pkg.name);
     return {
@@ -322,7 +336,8 @@ async function probeRepo(repoUrl) {
         version: pkg.version || '0.0.0',
         description: pkg.description || '',
         author: pkg.author || '',
-        logo,
+        logoBuf,
+        logoExt,
         keywords: pkg.keywords || [],
         platforms: pkg.platforms || [],
         branch,
