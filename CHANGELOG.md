@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.3] - 2026-08-25
+
+### refactor | 重构 / Refactoring
+
+重构仓库 logo 与 README 存储逻辑，logo 外置为二进制文件、readme 外置为 md 文件，repos.json 不再内联 base64/文本，体积大幅下降；渲染端通过 canbox-repo-logo 自定义协议直接读取二进制流
+
+Refactor repo logo and README storage: logos are externalized as binary files and READMEs as md files; repos.json no longer inlines base64/text, drastically reducing size; renderer reads binary streams directly via the canbox-repo-logo custom protocol
+
+### ci | 持续集成 / Continuous Integration
+
+修复 GitHub Release 工作流的正则匹配行首逻辑
+
+Fix regex line-start matching logic in GitHub Release workflow
+
 ## [0.2.2] - 2026-08-25
 
 ### feat | 新功能 / Features
