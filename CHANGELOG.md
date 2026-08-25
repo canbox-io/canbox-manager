@@ -4,6 +4,54 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.2] - 2026-08-25
+
+### feat | 新功能 / Features
+
+新增 cross-env 依赖，修复 Windows 下 npm run start 的 NODE_ENV 环境变量问题
+新增安装状态缓存与批量查询接口（manager.catalog.getInstallState/getInstallStates）
+仓库源组 APP Card 显示版本号
+
+Add cross-env dependency to fix NODE_ENV issue with npm run start on Windows
+Add install state cache and batch query API (manager.catalog.getInstallState/getInstallStates)
+Display version number on catalog source APP cards
+
+### fix | 问题修复 / Bug Fixes
+
+修复 Electron 环境下文件操作锁死问题（EPERM），统一使用 original-fs 避免 asar 补丁干扰
+修复 APP 卸载后安装状态不同步问题
+修复下载失败提示不明确问题，区分网络超时/DNS失败/HTTP状态码错误
+修复已安装 APP 仍显示下载按钮的问题
+
+Fix EPERM file operation lock issue in Electron by using original-fs to avoid asar patch interference
+Fix install state not syncing after APP uninstall
+Fix unclear download failure messages, distinguish network timeout/DNS failure/HTTP status errors
+Fix download button still showing for already-installed apps
+
+### refactor | 重构 / Refactoring
+
+重构仓库下载逻辑，引入统一下载追踪表 catalog-repos.json，以 repoUrl 为主键统一三组数据源下载入口
+将仓库操作按钮替换为图标按钮，优化布局与样式
+移除"应用仓库"卡片启动按钮，明确应用仓库与我的应用职责边界
+缓存提示从页面顶部移到底部页脚
+
+Refactor repo download logic, introduce unified download tracking table catalog-repos.json with repoUrl as primary key
+Replace repo action buttons with icon buttons, optimize layout and styling
+Remove launch button from app repo cards, clarify responsibility boundary between App Repos and My Apps
+Move cache notice from page top to footer
+
+### style | 样式 / Styling
+
+更新多语言文案"添加到我的仓库"为"下载"
+
+Update i18n text from "Add to My Repos" to "Download"
+
+### chore | 维护 / Maintenance
+
+将版本号从 0.2.1 升级至 0.2.2
+
+Bump version from 0.2.1 to 0.2.2
+
 ## [0.2.1] - 2026-08-09
 
 ### feat | 新功能 / Features
