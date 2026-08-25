@@ -121,7 +121,7 @@
         "sortStars": "按星标排序",
         "sortUpdated": "按更新时间排序",
         "sortName": "按名称排序",
-        "installFromCatalog": "添加到我的仓库",
+        "installFromCatalog": "下载",
         "viewReadme": "查看 README",
         "usingCache": "当前显示的是本地缓存数据",
         "partialFailed": "部分分片拉取失败，已使用缓存补全",

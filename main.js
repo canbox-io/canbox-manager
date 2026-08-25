@@ -250,14 +250,45 @@ async function importAppFromZip(zipPath, options) {
         const appId = isUpdate ? options.existingAppId : generateAppId();
         const destPath = path.join(appsDir, appId);
 
-        // 覆盖式更新：先清空旧目录（避免旧文件残留干扰新版本）
-        if (isUpdate && fs.existsSync(destPath)) {
-            const originalFs = require('original-fs');
-            originalFs.rmSync(destPath, { recursive: true, force: true });
+        // 复制 APP 到 apps/{appId}/（全程用 original-fs，避免 Electron asar 补丁干扰）
+        const originalFs = require('original-fs');
+
+        // 覆盖式更新：先关闭运行中的 APP，再清空旧目录（避免旧文件残留干扰新版本）
+        if (isUpdate && originalFs.existsSync(destPath)) {
+            // 先 kill 运行中的 APP，释放 exe/dll/asar 文件锁
+            if (isAppRunning(appId)) {
+                killApp(appId);
+                // 等待进程退出、文件锁释放
+                for (let i = 0; i < 5; i++) {
+                    await new Promise(r => setTimeout(r, 500));
+                    if (!isAppRunning(appId)) break;
+                }
+            }
+            // 带重试的目录删除（Windows 下文件锁释放有延迟，Defender 扫描也可能短暂锁定）
+            let removed = false;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    originalFs.rmSync(destPath, { recursive: true, force: true });
+                    removed = !originalFs.existsSync(destPath);
+                    if (removed) break;
+                } catch (e) {
+                    console.log('[importApp] rmSync attempt %d failed: %s', i + 1, e.message);
+                }
+                await new Promise(r => setTimeout(r, 800));
+            }
+            // rmSync 仍无法清空：重命名旧目录兜底，让安装继续
+            if (!removed && originalFs.existsSync(destPath)) {
+                const trashDir = destPath + '.__trash_' + Date.now();
+                try {
+                    originalFs.renameSync(destPath, trashDir);
+                    console.log('[importApp] rmSync failed, renamed old dir to %s', trashDir);
+                } catch (e) {
+                    console.error('[importApp] rename fallback also failed: %s', e.message);
+                }
+            }
         }
 
-        // 复制 APP 到 apps/{appId}/
-        fs.mkdirSync(destPath, { recursive: true });
+        originalFs.mkdirSync(destPath, { recursive: true });
         copyDirSync(tempDir, destPath);
 
         // 新装才记录 id → appId 映射；覆盖式更新时映射已存在，无需变更
@@ -454,23 +485,26 @@ ipcMain.handle('manager.apps.remove', async (_e, appId) => {
             console.log('[manager] remove: cleared idMap[%s]=%s', removedIdentifier, appId);
         }
 
-        // 同步更新仓库列表：清除匹配仓库的 installedAppId / toUpdate
-        const repos = getAllRepos();
-        let reposChanged = false;
-        for (const repo of Object.values(repos)) {
-            const repoIdentifier = repo.appId || repo.name;
-            if (repoIdentifier === removedIdentifier || repo.installedAppId === appId) {
-                if (repo.installedAppId || repo.toUpdate) {
-                    repo.installedAppId = null;
-                    repo.toUpdate = false;
-                    repo.updatedAt = Date.now();
-                    reposChanged = true;
+        // 同步统一下载追踪表 catalog-repos.json：清除匹配记录的安装追踪字段
+        // （APP 卸载后，对应 repoUrl 的记录应回到"未下载"状态）
+        const allRecords = getAllCatalogRepoRecords();
+        let recordsChanged = false;
+        for (const repoUrl of Object.keys(allRecords)) {
+            const record = allRecords[repoUrl];
+            if (!record) continue;
+            const recordIdentifier = record.appId || record.name;
+            if (recordIdentifier === removedIdentifier || record.installedAppId === appId) {
+                if (record.installedAppId || record.toUpdate) {
+                    record.installedAppId = null;
+                    record.installedVersion = null;
+                    record.toUpdate = false;
+                    recordsChanged = true;
                 }
             }
         }
-        if (reposChanged) {
-            saveAllRepos(repos);
-            console.log('[manager] remove: synced repos installedAppId');
+        if (recordsChanged) {
+            getCatalogReposStore().set('records', allRecords);
+            console.log('[manager] remove: synced catalog-repos install state');
         }
 
         return { success: true };
@@ -598,40 +632,37 @@ ipcMain.handle('manager.apps.repairLauncher', async (_e, appId) => {
     return result;
 });
 
-// 检查所有已安装 APP 的更新（同步所有已安装仓库，返回有更新的仓库列表）
+// 检查所有已安装 APP 的更新：遍历统一下载追踪表 catalog-repos.json，
+// 对有 installedAppId 的记录 probe 仓库最新版本，更新追踪表的 version/installedVersion/toUpdate。
 async function checkAllAppUpdates() {
-    const repos = getAllRepos();
+    const allRecords = getAllCatalogRepoRecords();
     const updates = [];
-    for (const repoId of Object.keys(repos)) {
-        const repo = repos[repoId];
-        if (!repo.installedAppId) continue;
+    for (const repoUrl of Object.keys(allRecords)) {
+        const record = allRecords[repoUrl];
+        if (!record || !record.installedAppId) continue;
         try {
-            const probed = await repoProbe.probeRepo(repo.url);
-            const installedVersion = getInstalledVersion(repo.installedAppId);
-            const toUpdate = installedVersion && installedVersion !== probed.version;
-            repos[repoId] = {
-                ...repo,
-                version: probed.version,
-                installedVersion,
-                toUpdate,
-                lastError: null,
-                updatedAt: Date.now()
-            };
+            const probed = await repoProbe.probeRepo(repoUrl);
+            const installedVersion = getInstalledVersion(record.installedAppId);
+            const toUpdate = !!installedVersion && installedVersion !== probed.version;
+            record.version = probed.version;
+            record.installedVersion = installedVersion;
+            record.toUpdate = toUpdate;
+            record.lastProbeAt = Date.now();
+            saveCatalogRepoRecord(repoUrl, record);
             if (toUpdate) {
                 updates.push({
-                    repoId,
-                    appId: repo.installedAppId,
-                    name: repo.name,
+                    repoUrl,
+                    appId: record.installedAppId,
+                    name: record.name,
                     currentVersion: installedVersion,
                     newVersion: probed.version
                 });
             }
         } catch (e) {
             // 单个仓库 probe 失败不影响其他
-            console.error('[checkUpdates] probe failed for %s: %s', repoId, e.message);
+            console.error('[checkUpdates] probe failed for %s: %s', repoUrl, e.message);
         }
     }
-    saveAllRepos(repos);
     return { success: true, updates };
 }
 
@@ -1162,6 +1193,29 @@ function saveAllRepos(repos) {
     getReposStore().set('repos', repos);
 }
 
+// -- 统一下载追踪表（catalog-repos.json）--
+// 三组数据来源（默认组 / 内置仓库源 / 自定义仓库源）的下载动作副产物，
+// 以 repoUrl 为公共主键，记录 probe 结果与安装追踪。与 repos.json 平级独立。
+
+function getCatalogReposStore() {
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
+    return store.getStore('canbox-manager', 'catalog-repos', path.join(USERS_PATH, 'data'));
+}
+
+function getAllCatalogRepoRecords() {
+    return getCatalogReposStore().get('records') || {};
+}
+
+function getCatalogRepoRecord(repoUrl) {
+    return getAllCatalogRepoRecords()[repoUrl] || null;
+}
+
+function saveCatalogRepoRecord(repoUrl, record) {
+    const all = getAllCatalogRepoRecords();
+    all[repoUrl] = record;
+    getCatalogReposStore().set('records', all);
+}
+
 /**
  * 检查仓库 APP 是否已安装，返回 installedAppId
  * @param {string} appIdentifier APP 标识（pkg.id || pkg.name，与 idMap 的 key 一致）
@@ -1190,15 +1244,127 @@ function getInstalledVersion(installedAppId) {
     }
 }
 
+/**
+ * 统一下载入口：以 repoUrl 为公共主键，处理三组（默认组/内置仓库源/自定义仓库源）下载。
+ * 流程：查追踪表 → 缺 appId 或版本过期则 probe → 判断安装状态 → 下载 → 安装 → 写追踪表 → 生成 launcher
+ * 进度事件 manager.repos.installProgress 以 repoUrl 为 key，三组统一。
+ *
+ * @param {string} repoUrl 仓库 URL（主键，三组公共）
+ * @param {object} [options]
+ * @param {string} [options.firstDownloadFrom] 'default' | sourceId（首次下载记录来源，仅记录一次）
+ * @returns {Promise<{success:boolean, appId?:string, isUpdate?:boolean, error?:string}>}
+ */
+async function installByRepoUrl(repoUrl, options = {}) {
+    if (!repoUrl) return { success: false, error: 'repoUrl 不能为空' };
+    const progressKey = repoUrl;
+    appInstallTasks.set(progressKey, { startedAt: Date.now() });
+    try {
+        // 1. 查追踪表
+        let record = getCatalogRepoRecord(repoUrl);
+        const isFirstDownload = !record;
+
+        // 2. 缺 appId 或版本过期 → probe 补全（阈值 24 小时）
+        const PROBE_STALE_MS = 24 * 60 * 60 * 1000;
+        const needProbe = !record || !record.appId || !record.lastProbeAt ||
+            (Date.now() - record.lastProbeAt) > PROBE_STALE_MS;
+        if (needProbe) {
+            const probed = await repoProbe.probeRepo(repoUrl);
+            record = record || { repoUrl };
+            record.appId = probed.id;
+            record.version = probed.version;
+            record.name = probed.name;
+            record.lastProbeAt = Date.now();
+            // 首次下载记录来源（仅记录一次，后续不覆盖）
+            if (isFirstDownload && options.firstDownloadFrom) {
+                record.firstDownloadFrom = options.firstDownloadFrom;
+            }
+            saveCatalogRepoRecord(repoUrl, record);
+        }
+
+        // 3. 判断安装状态（复用全局 idMap）
+        const existingAppId = record.installedAppId || checkInstalled(record.appId);
+        const installedVersion = getInstalledVersion(existingAppId);
+        const isUpdate = !!existingAppId && installedVersion !== record.version;
+
+        // 4. 下载（复用现有逻辑，与原 installRepo 完全相同）
+        const downloadUrl = await repoProbe.getReleaseDownloadUrl(
+            repoUrl, record.appId || record.name, record.name, record.version
+        );
+        if (!downloadUrl) {
+            return {
+                success: false,
+                error: `未找到 ${record.name} v${record.version} 的 release 下载资产，请确认仓库已发布对应版本`
+            };
+        }
+        const os = require('os');
+        const zipPath = path.join(os.tmpdir(), `canbox-install-${Date.now()}.zip`);
+        let lastProgress = 0;
+        await repoProbe.downloadFile(downloadUrl, zipPath, (progress) => {
+            // 节流发送进度（以 repoUrl 为 key，三组统一）
+            if (progress - lastProgress >= 10) {
+                lastProgress = progress;
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('manager.repos.installProgress', {
+                        repoUrl, progress
+                    });
+                }
+            }
+        });
+
+        // 5. 安装（复用 importAppFromZip，更新场景复用原 appId 目录）
+        const importOptions = existingAppId ? { existingAppId } : {};
+        const importResult = await importAppFromZip(zipPath, importOptions);
+        try { fs.unlinkSync(zipPath); } catch (e) {}
+
+        if (!importResult.success) {
+            return { success: false, error: importResult.error };
+        }
+
+        // 6. 更新追踪表
+        record.installedAppId = importResult.appId;
+        record.installedVersion = getInstalledVersion(importResult.appId);
+        record.toUpdate = false;
+        record.lastDownloadAt = Date.now();
+        saveCatalogRepoRecord(repoUrl, record);
+
+        // 7. 生成 launcher
+        const appInfo = readAppInfo(importResult.appId);
+        if (appInfo && !shouldSkipLauncherForApp(importResult.appId)) {
+            appLauncher.generateLauncher(appInfo);
+        }
+
+        return { success: true, appId: importResult.appId, isUpdate };
+    } catch (e) {
+        return { success: false, error: e.message };
+    } finally {
+        appInstallTasks.delete(progressKey);
+    }
+}
+
+/**
+ * 按 repoUrl 查追踪表获取安装状态（用于渲染层"已下载/可更新"徽标）
+ * @param {string} repoUrl 仓库 URL
+ * @param {string} [latestVersion] 仓库最新版本（传入则重新计算 toUpdate，避免追踪表过期）
+ */
+function getInstallState(repoUrl, latestVersion) {
+    const record = getCatalogRepoRecord(repoUrl);
+    if (!record || !record.installedAppId) return { installed: false };
+    const installedVersion = record.installedVersion || getInstalledVersion(record.installedAppId);
+    const toUpdate = latestVersion
+        ? !!installedVersion && installedVersion !== latestVersion
+        : !!record.toUpdate;
+    return {
+        installed: true,
+        toUpdate,
+        installedVersion,
+        installedAppId: record.installedAppId
+    };
+}
+
 ipcMain.handle('manager.repos.list', async () => {
     try {
-        const repos = getAllRepos();
-        // 实时检查安装状态（appId 即 pkg.id || pkg.name，与 idMap key 一致）
-        const list = Object.values(repos).map(repo => ({
-            ...repo,
-            installedAppId: checkInstalled(repo.appId || repo.name)
-        }));
-        return list;
+        // repos 表只存"用户主动添加的仓库元数据"，安装状态一律由渲染层查 catalog-repos.json 追踪表
+        return Object.values(getAllRepos());
     } catch (e) {
         return [];
     }
@@ -1234,7 +1400,6 @@ ipcMain.handle('manager.repos.add', async (_e, url) => {
             platforms: probed.platforms,
             branch: probed.branch,
             readme: probed.readme,
-            installedAppId: checkInstalled(probed.id),
             lastError: null,
             createdAt: Date.now(),
             updatedAt: Date.now()
@@ -1271,10 +1436,14 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
 
         const probed = await repoProbe.probeRepo(repo.url);
 
-        // 检查是否有新版本：对比"已安装版本" vs "仓库最新版本"
-        const installedAppId = checkInstalled(probed.id);
-        const installedVersion = getInstalledVersion(installedAppId);
-        const toUpdate = installedAppId && installedVersion && installedVersion !== probed.version;
+        // repos 表只存仓库元数据；安装追踪由 catalog-repos.json 追踪表接管。
+        // 同步时若追踪表已有该 repoUrl 的记录，顺带刷新其 version/lastProbeAt（用于已下载徽标对比）
+        const existingRecord = getCatalogRepoRecord(repo.url);
+        if (existingRecord) {
+            existingRecord.version = probed.version;
+            existingRecord.lastProbeAt = Date.now();
+            saveCatalogRepoRecord(repo.url, existingRecord);
+        }
 
         repos[repoId] = {
             ...repo,
@@ -1289,9 +1458,6 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             platforms: probed.platforms,
             branch: probed.branch,
             readme: probed.readme,
-            installedAppId,
-            installedVersion,
-            toUpdate,
             lastError: null,
             updatedAt: Date.now()
         };
@@ -1307,85 +1473,6 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             saveAllRepos(repos);
         }
         return { success: false, error: e.message };
-    }
-});
-
-ipcMain.handle('manager.repos.install', async (_e, repoId) => {
-    appInstallTasks.set(repoId, { startedAt: Date.now() });
-    try {
-        const repos = getAllRepos();
-        const repo = repos[repoId];
-        if (!repo) {
-            return { success: false, error: '仓库不存在' };
-        }
-
-        // 兼容旧记录：appId 字段是后加的，旧仓库记录可能缺失，此时重新 probe 补全
-        if (!repo.appId) {
-            console.log('[repos.install] repo.appId missing, re-probing to backfill: repoId=%s', repoId);
-            try {
-                const probed = await repoProbe.probeRepo(repo.url);
-                repo.appId = probed.id;
-                repo.logo = repo.logo || probed.logo;
-                repo.keywords = probed.keywords;
-                repo.platforms = probed.platforms;
-                repo.branch = probed.branch;
-                repo.readme = probed.readme;
-                saveAllRepos(repos);
-                console.log('[repos.install] backfilled appId=%s for repoId=%s', repo.appId, repoId);
-            } catch (e) {
-                console.log('[repos.install] backfill probe failed: %s', e.message);
-            }
-        }
-
-        // 获取 release 下载 URL（优先用 appId 匹配资产名，name 兜底）
-        const downloadUrl = await repoProbe.getReleaseDownloadUrl(repo.url, repo.appId || repo.name, repo.name, repo.version);
-        if (!downloadUrl) {
-            return { success: false, error: `未找到 ${repo.name} v${repo.version} 的 release 下载资产，请确认仓库已发布对应版本` };
-        }
-
-        // 下载 zip 到临时目录
-        const os = require('os');
-        const zipPath = path.join(os.tmpdir(), `canbox-repo-install-${repoId}-${Date.now()}.zip`);
-        let lastProgress = 0;
-        await repoProbe.downloadFile(downloadUrl, zipPath, (progress) => {
-            // 节流发送进度
-            if (progress - lastProgress >= 10) {
-                lastProgress = progress;
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('manager.repos.installProgress', { repoId, progress });
-                }
-            }
-        });
-
-        // 复用 importAppFromZip
-        // 更新场景：已有 installedAppId 时复用原 appId 目录（覆盖式更新），避免目录残留
-        const existingAppId = repo.installedAppId || checkInstalled(repo.appId || repo.name);
-        const importOptions = existingAppId ? { existingAppId } : {};
-        const importResult = await importAppFromZip(zipPath, importOptions);
-        // 清理临时文件
-        try { fs.unlinkSync(zipPath); } catch (e) {}
-
-        if (!importResult.success) {
-            return { success: false, error: importResult.error };
-        }
-
-        // 更新仓库元数据
-        repo.installedAppId = importResult.appId;
-        repo.installedVersion = getInstalledVersion(importResult.appId);
-        repo.toUpdate = false;
-        repo.updatedAt = Date.now();
-        repos[repoId] = repo;
-        saveAllRepos(repos);
-
-        // 生产模式下写 launcher（缺 electron 运行时则跳过，待 electron 下载完成后补生成）
-        const appInfo = readAppInfo(importResult.appId);
-        if (appInfo && !shouldSkipLauncherForApp(importResult.appId)) appLauncher.generateLauncher(appInfo);
-
-        return { success: true, appId: importResult.appId };
-    } catch (e) {
-        return { success: false, error: e.message };
-    } finally {
-        appInstallTasks.delete(repoId);
     }
 });
 
@@ -1471,6 +1558,27 @@ ipcMain.handle('manager.catalog.getRepoMarkdown', async (_e, repoUrl, filePath, 
     } catch (e) {
         return { success: false, error: e.message };
     }
+});
+
+// -- 统一下载入口（默认组 / 内置仓库源 / 自定义仓库源 共用）--
+
+ipcMain.handle('manager.catalog.install', async (_e, repoUrl, options) => {
+    return await installByRepoUrl(repoUrl, options || {});
+});
+
+// 单条查询：渲染层按 repoUrl 查安装状态（徽标用）
+ipcMain.handle('manager.catalog.getInstallState', async (_e, repoUrl, latestVersion) => {
+    return getInstallState(repoUrl, latestVersion);
+});
+
+// 批量查询：渲染层一次性获取多卡片的安装状态，避免 N 次 IPC 往返
+// 入参：[{ repoUrl, latestVersion? }, ...]，出参：[{ repoUrl, installed, toUpdate, installedVersion? }, ...]
+ipcMain.handle('manager.catalog.getInstallStates', async (_e, queries) => {
+    if (!Array.isArray(queries)) return [];
+    return queries.map(q => {
+        const state = getInstallState(q.repoUrl, q.latestVersion);
+        return { repoUrl: q.repoUrl, ...state };
+    });
 });
 
 // -- 数据目录管理（读取/迁移 Users 目录，由 canbox-core env.js 读取 config.json 生效）--
@@ -2203,10 +2311,10 @@ app.on('activate', () => {
 // ====== 辅助函数 ======
 
 function copyDirSync(src, dest) {
-    if (!fs.existsSync(dest)) {
-        fs.mkdirSync(dest, { recursive: true });
-    }
     const originalFs = require('original-fs');
+    if (!originalFs.existsSync(dest)) {
+        originalFs.mkdirSync(dest, { recursive: true });
+    }
     const entries = originalFs.readdirSync(src, { withFileTypes: true });
     for (const entry of entries) {
         const srcPath = path.join(src, entry.name);

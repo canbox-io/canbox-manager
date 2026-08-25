@@ -125,7 +125,7 @@
         "sortStars": "Sort by stars",
         "sortUpdated": "Sort by updated",
         "sortName": "Sort by name",
-        "installFromCatalog": "Add to my repos",
+        "installFromCatalog": "Download",
         "viewReadme": "View README",
         "usingCache": "Showing cached data",
         "partialFailed": "Some shards failed to load, using cache as fallback",

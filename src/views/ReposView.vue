@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref, computed, nextTick } from 'vue';
+import { onMounted, onUnmounted, ref, computed, nextTick, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElMessageBox } from 'element-plus';
 import MarkdownIt from 'markdown-it';
@@ -180,8 +180,9 @@ let removeProgressListener = null;
 onMounted(async () => {
     reposStore.fetchRepos();
     removeProgressListener = window.api.manager.onInstallProgress((data) => {
-        if (data && data.repoId) {
-            reposStore.installProgress[data.repoId] = data.progress;
+        // 三组统一以 repoUrl 为进度 key
+        if (data && data.repoUrl) {
+            reposStore.installProgress[data.repoUrl] = data.progress;
         }
     });
     await catalogStore.fetchSources();
@@ -193,6 +194,24 @@ onMounted(async () => {
     catalogStore.primeAllCaches();
     window.addEventListener('keydown', onGlobalKey);
 });
+
+// 默认组仓库列表变化时，批量刷新追踪表安装状态（徽标用）
+watch(() => reposStore.repos, (repos) => {
+    const queries = repos.map(r => ({ repoUrl: r.url, latestVersion: r.version }));
+    if (queries.length) reposStore.refreshInstallStates(queries);
+}, { deep: false });
+
+// 仓库源组（catalog）当前应用列表变化时，同样批量刷新
+watch(() => catalogStore.currentApps, (apps) => {
+    const queries = apps.map(a => ({ repoUrl: a.repo, latestVersion: a.appVersion }));
+    if (queries.length) reposStore.refreshInstallStates(queries);
+}, { deep: false });
+
+// 全局搜索结果变化时，刷新其安装状态（跨组统一）
+watch(() => catalogStore.filteredApps, (apps) => {
+    const queries = apps.map(a => ({ repoUrl: a.repo, latestVersion: a.appVersion }));
+    if (queries.length) reposStore.refreshInstallStates(queries);
+}, { deep: false });
 
 onUnmounted(() => {
     if (removeProgressListener) removeProgressListener();
@@ -283,23 +302,12 @@ async function handleSyncAll() {
 }
 
 async function handleInstall(repo) {
-    const result = await reposStore.installRepo(repo.id);
+    // 默认组：与仓库源组完全对等，统一调 installByRepoUrl(repo.url, ...)
+    const result = await reposStore.installByRepoUrl(repo.url, { firstDownloadFrom: 'default' });
     if (result.success) {
         notification.success(t('repos.installSuccess'));
     } else {
         notification.error(result.error || t('repos.installFailed'));
-    }
-}
-
-async function handleLaunch(repo) {
-    if (!repo.installedAppId) return;
-    try {
-        const result = await window.api.manager.appsLaunch(repo.installedAppId);
-        if (!result.success) {
-            notification.error(result.error || t('apps.launchFailed'));
-        }
-    } catch (e) {
-        notification.error(e.message || t('apps.launchFailed'));
     }
 }
 
@@ -426,17 +434,18 @@ async function openCatalogAppReadme(app) {
 }
 
 async function handleInstallFromCatalog(app) {
+    // 仓库源组：与默认组完全对等，统一调 installByRepoUrl(app.repo, ...)
+    // 不再调 addRepo 污染默认组 repos 表
+    const sourceId = catalogStore.currentSourceId;
     try {
-        const result = await reposStore.addRepo(app.repo);
+        const result = await reposStore.installByRepoUrl(app.repo, { firstDownloadFrom: sourceId });
         if (result && result.success) {
-            notification.success(t('repos.addSuccess'));
-        } else if (result && result.error === 'duplicate_url') {
-            notification.warning(t('repos.addDuplicate'));
+            notification.success(t('repos.installSuccess'));
         } else if (result) {
-            notification.error(result.error || t('repos.addFailed'));
+            notification.error(result.error || t('repos.installFailed'));
         }
     } catch (e) {
-        notification.error(e.message || t('repos.addFailed'));
+        notification.error(e.message || t('repos.installFailed'));
     }
 }
 
@@ -615,7 +624,11 @@ const searchTotal = computed(() =>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="26" height="26"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" /></svg>
                                 </div>
                                 <div class="repo-info">
-                                    <div class="repo-name">{{ item.displayName || item.name }}</div>
+                                    <div class="repo-name">
+                                        <span>{{ item.displayName || item.name }}</span>
+                                        <el-tag v-if="reposStore.getInstallState(item.url).installed && reposStore.getInstallState(item.url).toUpdate" type="warning" size="small" effect="light">{{ $t('repos.hasUpdate') }}</el-tag>
+                                        <el-tag v-else-if="reposStore.getInstallState(item.url).installed" type="success" size="small" effect="light">{{ $t('repos.installed') }}</el-tag>
+                                    </div>
                                     <div class="repo-url">{{ item.url }}</div>
                                     <div class="repo-meta-row">
                                         <div class="platform-badges">
@@ -634,10 +647,13 @@ const searchTotal = computed(() =>
                                 <div class="repo-info">
                                     <div class="repo-name">
                                         <span class="catalog-app-name" @click="openCatalogAppReadme(item)">{{ item.name }}</span>
-                                        <el-tag size="small" :type="statusType(item.status)" effect="light" round>{{ statusLabel(item.status) }}</el-tag>
+                                        <el-tag v-if="reposStore.getInstallState(item.repo).installed && reposStore.getInstallState(item.repo).toUpdate" type="warning" size="small" effect="light">{{ $t('repos.hasUpdate') }}</el-tag>
+                                        <el-tag v-else-if="reposStore.getInstallState(item.repo).installed" type="success" size="small" effect="light">{{ $t('repos.installed') }}</el-tag>
+                                        <el-tag v-else size="small" :type="statusType(item.status)" effect="light" round>{{ statusLabel(item.status) }}</el-tag>
                                     </div>
                                     <div class="catalog-desc">{{ catalogStore.matchLang(item) }}</div>
                                     <div class="repo-meta-row">
+                                        <span v-if="item.appVersion" class="meta-chip">v{{ item.appVersion }}</span>
                                         <span v-if="item.category" class="meta-chip">{{ item.category }}</span>
                                         <span v-if="item.stars" class="meta-chip">★ {{ formatNumber(item.stars) }}</span>
                                     </div>
@@ -729,8 +745,8 @@ const searchTotal = computed(() =>
                         <div class="repo-header-row">
                             <span class="repo-name">{{ repo.displayName || repo.name }}</span>
                             <el-tag v-if="repo.lastError" type="danger" size="small" effect="light">{{ $t('repos.probeFailed') }}</el-tag>
-                            <el-tag v-else-if="repo.installedAppId && repo.toUpdate" type="warning" size="small" effect="light">{{ $t('repos.hasUpdate') }}</el-tag>
-                            <el-tag v-else-if="repo.installedAppId" type="success" size="small" effect="light">{{ $t('repos.installed') }}</el-tag>
+                            <el-tag v-else-if="reposStore.getInstallState(repo.url).installed && reposStore.getInstallState(repo.url).toUpdate" type="warning" size="small" effect="light">{{ $t('repos.hasUpdate') }}</el-tag>
+                            <el-tag v-else-if="reposStore.getInstallState(repo.url).installed" type="success" size="small" effect="light">{{ $t('repos.installed') }}</el-tag>
                         </div>
                         <div class="repo-url">{{ repo.url }}</div>
                         <div class="repo-meta-row">
@@ -741,22 +757,23 @@ const searchTotal = computed(() =>
                             <span v-if="repo.lastSyncAt" class="meta-chip">
                                 {{ $t('repos.lastSync') }}: {{ new Date(repo.lastSyncAt).toLocaleString() }}
                             </span>
-                            <span v-if="repo.installedAppId && repo.installedVersion" class="meta-chip">
-                                {{ $t('repos.installedVersion') }}: v{{ repo.installedVersion }}
+                            <span v-if="reposStore.getInstallState(repo.url).installed && reposStore.getInstallState(repo.url).installedVersion" class="meta-chip">
+                                {{ $t('repos.installedVersion') }}: v{{ reposStore.getInstallState(repo.url).installedVersion }}
                             </span>
                         </div>
                         <div v-if="repo.lastError" class="repo-error">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                             <span>{{ repo.lastError }}</span>
                         </div>
-                        <div v-if="reposStore.installProgress[repo.id] !== undefined && reposStore.installing[repo.id]" class="install-progress-mini">
-                            <el-progress :percentage="reposStore.installProgress[repo.id]" :stroke-width="6" :show-text="false" />
-                            <span class="install-progress-label">{{ reposStore.installProgress[repo.id] }}%</span>
+                        <div v-if="reposStore.installProgress[repo.url] !== undefined && reposStore.installing[repo.url]" class="install-progress-mini">
+                            <el-progress :percentage="reposStore.installProgress[repo.url]" :stroke-width="6" :show-text="false" />
+                            <span class="install-progress-label">{{ reposStore.installProgress[repo.url] }}%</span>
                         </div>
                         <div class="repo-actions">
-                            <el-tooltip :content="$t('repos.install')" placement="top">
-                                <button class="icon-btn install-btn" :disabled="reposStore.installing[repo.id]" @click="handleInstall(repo)">
-                                    <span v-if="reposStore.installing[repo.id]" class="mini-spinner"></span>
+                            <el-tooltip v-if="!reposStore.getInstallState(repo.url).installed || reposStore.getInstallState(repo.url).toUpdate" :content="reposStore.getInstallState(repo.url).toUpdate ? $t('apps.update') : $t('repos.install')" placement="top">
+                                <button class="icon-btn install-btn" :disabled="reposStore.installing[repo.url]" @click="handleInstall(repo)">
+                                    <span v-if="reposStore.installing[repo.url]" class="mini-spinner"></span>
+                                    <span v-else-if="reposStore.getInstallState(repo.url).toUpdate">🔄</span>
                                     <span v-else>⬇️</span>
                                 </button>
                             </el-tooltip>
@@ -765,9 +782,6 @@ const searchTotal = computed(() =>
                                     <span v-if="reposStore.syncing[repo.id]" class="mini-spinner"></span>
                                     <span v-else>🔄</span>
                                 </button>
-                            </el-tooltip>
-                            <el-tooltip v-if="repo.installedAppId" :content="$t('repos.launch')" placement="top">
-                                <button class="icon-btn launch-btn" @click="handleLaunch(repo)">▶️</button>
                             </el-tooltip>
                             <el-tooltip :content="$t('repos.viewReadme')" placement="top">
                                 <button class="icon-btn readme-btn" @click="openRepoReadme(repo)">📄</button>
@@ -787,13 +801,6 @@ const searchTotal = computed(() =>
 
             <!-- 非默认源：Catalog APP 列表 -->
             <template v-else>
-                <div v-if="catalogStore.fromCache" class="cache-hint">
-                    <el-alert :title="$t('catalog.usingCache')" type="info" :closable="false" show-icon />
-                </div>
-                <div v-if="catalogStore.partialFailed" class="cache-hint">
-                    <el-alert :title="$t('catalog.partialFailed')" type="warning" :closable="false" show-icon />
-                </div>
-
                 <div v-if="catalogStore.error && !catalogStore.fromCache" class="catalog-error">
                     <el-result icon="error" :title="$t('catalog.fetchFailed')" :sub-title="catalogStore.error">
                         <template #extra>
@@ -817,10 +824,13 @@ const searchTotal = computed(() =>
                         <div class="repo-info">
                             <div class="repo-header-row">
                                 <span class="catalog-app-name" @click="openCatalogAppReadme(app)" :title="$t('catalog.viewReadme')">{{ app.name }}</span>
-                                <el-tag size="small" :type="statusType(app.status)" effect="light" round>{{ statusLabel(app.status) }}</el-tag>
+                                <el-tag v-if="reposStore.getInstallState(app.repo).installed && reposStore.getInstallState(app.repo).toUpdate" type="warning" size="small" effect="light">{{ $t('repos.hasUpdate') }}</el-tag>
+                                <el-tag v-else-if="reposStore.getInstallState(app.repo).installed" type="success" size="small" effect="light">{{ $t('repos.installed') }}</el-tag>
+                                <el-tag v-else size="small" :type="statusType(app.status)" effect="light" round>{{ statusLabel(app.status) }}</el-tag>
                             </div>
                             <div class="catalog-desc">{{ catalogStore.matchLang(app) }}</div>
                             <div class="repo-meta-row catalog-meta">
+                                <span v-if="app.appVersion" class="meta-chip">v{{ app.appVersion }}</span>
                                 <span v-if="app.category" class="meta-chip">{{ app.category }}</span>
                                 <span class="meta-chip" v-if="app.stars != null">★ {{ formatNumber(app.stars) }}</span>
                                 <span class="meta-chip" v-if="app.forks != null">⑂ {{ formatNumber(app.forks) }}</span>
@@ -828,13 +838,28 @@ const searchTotal = computed(() =>
                                 <span v-if="app.lastCommitAt" class="meta-chip" :title="$t('catalog.lastCommit')">
                                     {{ formatDate(app.lastCommitAt) }}
                                 </span>
+                                <span v-if="reposStore.getInstallState(app.repo).installed && reposStore.getInstallState(app.repo).installedVersion" class="meta-chip">
+                                    {{ $t('repos.installedVersion') }}: v{{ reposStore.getInstallState(app.repo).installedVersion }}
+                                </span>
                             </div>
                             <div v-if="app.tags && app.tags.length" class="catalog-tags-row">
                                 <el-tag v-for="tag in app.tags.slice(0, 4)" :key="tag" size="small" type="info" effect="plain" round>{{ tag }}</el-tag>
                             </div>
+                            <div v-if="reposStore.installProgress[app.repo] !== undefined && reposStore.installing[app.repo]" class="install-progress-mini">
+                                <el-progress :percentage="reposStore.installProgress[app.repo]" :stroke-width="6" :show-text="false" />
+                                <span class="install-progress-label">{{ reposStore.installProgress[app.repo] }}%</span>
+                            </div>
                             <div class="repo-actions">
-                                <el-tooltip :content="$t('catalog.installFromCatalog')" placement="top">
-                                    <button class="icon-btn install-btn" @click="handleInstallFromCatalog(app)">⬇️</button>
+                                <el-tooltip v-if="!reposStore.getInstallState(app.repo).installed || reposStore.getInstallState(app.repo).toUpdate" :content="reposStore.getInstallState(app.repo).toUpdate ? $t('apps.update') : $t('repos.install')" placement="top">
+                                    <button
+                                        class="icon-btn install-btn"
+                                        :disabled="reposStore.installing[app.repo]"
+                                        @click="handleInstallFromCatalog(app)"
+                                    >
+                                        <span v-if="reposStore.installing[app.repo]" class="mini-spinner"></span>
+                                        <span v-else-if="reposStore.getInstallState(app.repo).toUpdate">🔄</span>
+                                        <span v-else>⬇️</span>
+                                    </button>
                                 </el-tooltip>
                                 <el-tooltip :content="$t('catalog.viewReadme')" placement="top">
                                     <button class="icon-btn readme-btn" @click="openCatalogAppReadme(app)">📄</button>
@@ -849,9 +874,11 @@ const searchTotal = computed(() =>
                     </div>
                 </div>
 
-                <div v-if="catalogStore.currentMeta" class="catalog-footer">
-                    <span>{{ $t('catalog.totalApps', { count: catalogStore.currentMeta.totalApps || catalogStore.currentApps.length }) }}</span>
-                    <span v-if="catalogStore.currentMeta.lastRefresh">
+                <div v-if="catalogStore.currentMeta || catalogStore.fromCache || catalogStore.partialFailed" class="catalog-footer">
+                    <span v-if="catalogStore.fromCache" class="cache-hint-text">{{ $t('catalog.usingCache') }}</span>
+                    <span v-if="catalogStore.partialFailed" class="cache-hint-text">{{ $t('catalog.partialFailed') }}</span>
+                    <span v-if="catalogStore.currentMeta">{{ $t('catalog.totalApps', { count: catalogStore.currentMeta.totalApps || catalogStore.currentApps.length }) }}</span>
+                    <span v-if="catalogStore.currentMeta && catalogStore.currentMeta.lastRefresh">
                         {{ $t('catalog.lastRefresh') }}: {{ new Date(catalogStore.currentMeta.lastRefresh).toLocaleString() }}
                     </span>
                 </div>
@@ -1244,9 +1271,9 @@ const searchTotal = computed(() =>
     color: var(--el-text-color-secondary);
 }
 
-.cache-hint {
-    grid-column: 1 / -1;
-    margin-bottom: 4px;
+.cache-hint-text {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
 }
 
 .catalog-error,

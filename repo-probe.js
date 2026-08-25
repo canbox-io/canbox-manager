@@ -197,7 +197,8 @@ async function getReleaseDownloadUrl(repoUrl, appIdentifier, name, version) {
  * 把 resp.data 变成对象。这里必须禁用 transformResponse，强制返回原始字符串，
  * 否则后续 JSON.parse(对象) 会得到 "[object Object]" 导致解析失败。
  *
- * @returns {Promise<string|null>} 文件内容（字符串），失败返回 null
+ * @returns {Promise<{text: string|null, statusCode: number|null, networkError: string|null}>}
+ *   成功时 text 为文件内容；失败时 text 为 null，statusCode/networkError 标识失败原因
  */
 async function fetchText(url) {
     try {
@@ -209,17 +210,25 @@ async function fetchText(url) {
         });
         if (resp.status !== 200) {
             console.log('[repo-probe] fetchText non-200: status=%s url=%s', resp.status, url);
-            return null;
+            return { text: null, statusCode: resp.status, networkError: null };
         }
         const text = resp.data;
         if (typeof text !== 'string') {
             console.log('[repo-probe] fetchText unexpected data type=%s url=%s', typeof text, url);
-            return null;
+            return { text: null, statusCode: resp.status, networkError: 'invalid_data_type' };
         }
-        return text;
+        return { text, statusCode: 200, networkError: null };
     } catch (e) {
-        console.log('[repo-probe] fetchText error: %s url=%s', e.message, url);
-        return null;
+        let networkError = 'network';
+        if (e.code === 'ECONNABORTED' || (e.message && e.message.includes('timeout'))) {
+            networkError = 'timeout';
+        } else if (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN') {
+            networkError = 'dns';
+        } else if (e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET') {
+            networkError = 'connection';
+        }
+        console.log('[repo-probe] fetchText error: %s (code=%s, networkError=%s) url=%s', e.message, e.code, networkError, url);
+        return { text: null, statusCode: null, networkError };
     }
 }
 
@@ -255,10 +264,23 @@ async function probeRepo(repoUrl) {
 
     const pkgUrl = getRawUrl(repoUrl, branch, 'package.json');
     console.log('[repo-probe] probeRepo: fetching package.json: %s', pkgUrl);
-    const pkgText = await fetchText(pkgUrl);
-    if (!pkgText) {
-        throw new Error('无法访问 package.json，请确认仓库地址正确且为公开仓库');
+    const pkgResult = await fetchText(pkgUrl);
+    if (!pkgResult.text) {
+        if (pkgResult.networkError === 'timeout') {
+            throw new Error('网络请求超时，无法访问仓库。可能网络不稳定或 GitHub 访问受限，请检查网络后重试');
+        }
+        if (pkgResult.networkError === 'dns' || pkgResult.networkError === 'connection' || pkgResult.networkError === 'network') {
+            throw new Error('网络连接失败，无法访问仓库。可能原因：网络不稳定或 GitHub 访问受限，请检查网络后重试');
+        }
+        if (pkgResult.statusCode === 404) {
+            throw new Error('仓库中找不到 package.json，请确认仓库地址正确且为公开的 Canbox APP 仓库');
+        }
+        if (pkgResult.statusCode === 403) {
+            throw new Error('仓库访问被拒绝（HTTP 403），可能是私有仓库或 GitHub API 限流，请稍后重试');
+        }
+        throw new Error(`无法访问仓库文件（HTTP ${pkgResult.statusCode}），请确认仓库地址正确且为公开仓库`);
     }
+    const pkgText = pkgResult.text;
     console.log('[repo-probe] probeRepo: package.json length=%d', pkgText.length);
     let pkg;
     try {
@@ -454,7 +476,10 @@ async function downloadFile(url, destPath, onProgress) {
             console.log('[repo-probe] downloadFile: %s failed: %s', candidate.name, e.message);
         }
     }
-    throw lastErr;
+    const reason = lastErr && lastErr.message ? lastErr.message : '未知错误';
+    const isHttpStatus = /^HTTP \d+/.test(reason);
+    const hint = isHttpStatus ? '' : '。可能网络不稳定或 GitHub 访问受限，请检查网络后重试';
+    throw new Error(`下载失败：${reason}${hint}`);
 }
 
 module.exports = {
