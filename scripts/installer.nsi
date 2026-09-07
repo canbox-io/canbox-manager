@@ -9,7 +9,7 @@
 
 ; ====== Basic info ======
 Name "Canbox"
-OutFile "..\release\Canbox-Setup-x86_64.exe"
+OutFile "..\release\Canbox-Setup-win-x64.exe"
 InstallDir "$LOCALAPPDATA\Programs\Canbox"
 InstallDirRegKey HKCU "Software\Canbox" "InstallDir"
 RequestExecutionLevel user
@@ -84,6 +84,16 @@ Section "Canbox" SecMain
 
     ; Desktop shortcut - use icon.ico
     CreateShortCut "$DESKTOP\Canbox.lnk" "$INSTDIR\bin\canbox.exe" "manager" "$INSTDIR\manager\icons\icon.ico" 0
+
+    ; Post-install: self-sign electron.exe to bypass WDCI slow startup on Windows 11
+    ; Creates a per-user self-signed code signing cert, trusts it, signs all electron.exe under $INSTDIR
+    ; Only runs on Windows; harmless if PowerShell is unavailable (falls back silently)
+    DetailPrint "Applying performance optimization (signing electron.exe)..."
+    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\scripts\post-sign.ps1" -InstallDir "$INSTDIR"'
+    Pop $0
+    ${If} $0 != 0
+        DetailPrint "  (signing step returned code $0 - this is non-fatal)"
+    ${EndIf}
 SectionEnd
 
 ; ====== Uninstall logic ======

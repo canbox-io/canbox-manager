@@ -2075,6 +2075,36 @@ ipcMain.handle('manager.electron.download', async (_e, version) => {
             }
         }
 
+        // 3b. Windows: 自签新下载的 electron.exe (绕过 WDCI 慢启动)
+        // manager 下载的 electron 在 {userData}/runtime/ 下, 不在 CANBOX_HOME 里,
+        // NSIS 安装时的 post-sign.ps1 扫不到这里, 必须在下载后立即补签。
+        if (process.platform === 'win32') {
+            try {
+                const signScript = path.join(CANBOX_HOME, 'scripts', 'post-sign.ps1');
+                if (fs.existsSync(signScript)) {
+                    const markerFile = path.join(CANBOX_HOME, '.canbox-signed');
+                    if (fs.existsSync(markerFile)) fs.unlinkSync(markerFile);
+
+                    const ps = require('child_process');
+                    ps.spawn('powershell.exe', [
+                        '-NoProfile',
+                        '-ExecutionPolicy', 'Bypass',
+                        '-File', signScript,
+                        '-InstallDir', CANBOX_HOME,
+                        '-ExtraPaths', targetDir
+                    ], {
+                        windowsHide: true,
+                        stdio: 'ignore'
+                    }).on('error', (err) => {
+                        console.warn('[manager] auto-sign failed (non-fatal):', err.message);
+                    });
+                    console.log('[manager] spawned auto-sign for', targetDir);
+                }
+            } catch (e) {
+                console.warn('[manager] auto-sign setup failed (non-fatal):', e.message);
+            }
+        }
+
         // 4. 写入注册表
         const registryPath = getRegistryPath(env.userData);
         console.log('[main] download 写注册表前, 路径:', registryPath);
@@ -2463,5 +2493,3 @@ function copyDirSync(src, dest) {
         }
     }
 }
-
-

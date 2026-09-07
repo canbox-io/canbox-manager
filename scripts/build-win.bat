@@ -1,6 +1,6 @@
 @echo off
 REM Canbox Windows build script
-REM Output: Canbox-Setup-x86_64.exe (NSIS installer)
+REM Output: Canbox-Setup-win-x64.exe (NSIS installer)
 REM
 REM Usage: npm run dist:win
 REM Requires: NSIS (makensis), node_modules/electron, Node.js >= 24
@@ -22,7 +22,7 @@ if errorlevel 1 (
 
 set OUTPUT_DIR=release
 set STAGE_DIR=%OUTPUT_DIR%\stage
-set INSTALLER=%OUTPUT_DIR%\Canbox-Setup-x86_64.exe
+set INSTALLER=%OUTPUT_DIR%\Canbox-Setup-win-x64.exe
 
 echo ====== Canbox Windows Build ======
 
@@ -98,6 +98,11 @@ popd
 mkdir "%STAGE_DIR%\canbox\bin"
 copy /y bin\canbox-sea\canbox.exe "%STAGE_DIR%\canbox\bin\" >nul
 echo   bin/canbox.exe: copied
+
+REM 2e. Copy post-sign script (run by NSIS installer after install, and by canbox-sea launcher as fallback)
+mkdir "%STAGE_DIR%\canbox\scripts"
+copy /y scripts\post-sign.ps1 "%STAGE_DIR%\canbox\scripts\" >nul
+echo   scripts/post-sign.ps1: copied
 
 REM 3. Generate NSIS installer
 echo [3/5] Generate NSIS installer...

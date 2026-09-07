@@ -228,8 +228,49 @@ function resolveAppElectron(appDir) {
     return electronPath;
 }
 
+// ====== Windows 自签 electron.exe (绕过 WDCI 启动慢) ======
+// 仅 Windows 需要：WDCI (Windows Defender Code Integrity) 对未签名的大 PE 文件
+// CreateProcess 开销巨大。自签后 WDCI 直接信任跳过，CreateProcess 从 3000ms+
+// 降到 200ms 以内。
+//
+// 兜底机制：即使 NSIS 安装时已签过，当 manager 下载了新 electron 版本后，
+// 新版本 electron.exe 还没签，此时首次启动会自动补签。
+//
+// 优化: 用 $CANBOX_HOME/.canbox-signed 标记文件快速跳过, 避免每次启动
+//       都 spawn PowerShell (冷启动约 500ms).
+//       manager 更新 electron 版本后删除此标记文件, 下次启动自动补签.
+function ensureElectronSigned(electronPath) {
+    if (process.platform !== 'win32') return;
+
+    const { execFileSync } = require('child_process');
+
+    const markerPath = path.join(CANBOX_HOME, '.canbox-signed');
+    if (fs.existsSync(markerPath)) return;
+
+    const signScript = path.join(CANBOX_HOME, 'scripts', 'post-sign.ps1');
+    if (!fs.existsSync(signScript)) return;
+
+    try {
+        execFileSync('powershell.exe', [
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', signScript,
+            '-InstallDir', CANBOX_HOME
+        ], {
+            stdio: 'ignore',
+            windowsHide: true,
+            timeout: 15000
+        });
+    } catch (e) {
+        // 签名失败不阻塞启动（可能是权限问题、PowerShell 不可用等）
+    }
+}
+
 // ====== 启动 electron ======
 function launchElectron(electronPath, args) {
+    // Windows: ensure electron.exe is signed before spawning (avoids WDCI delay)
+    ensureElectronSigned(electronPath);
+
     const child = spawn(electronPath, args, {
         detached: true,
         stdio: 'ignore',
