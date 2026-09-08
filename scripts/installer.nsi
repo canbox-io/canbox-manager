@@ -9,7 +9,7 @@
 
 ; ====== Basic info ======
 Name "Canbox"
-OutFile "..\release\Canbox-Setup-win-x64.exe"
+OutFile "..\release\Canbox-Setup-x86_64.exe"
 InstallDir "$LOCALAPPDATA\Programs\Canbox"
 InstallDirRegKey HKCU "Software\Canbox" "InstallDir"
 RequestExecutionLevel user

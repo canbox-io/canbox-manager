@@ -1,6 +1,6 @@
 @echo off
 REM Canbox Windows build script
-REM Output: Canbox-Setup-win-x64.exe (NSIS installer)
+REM Output: Canbox-Setup-x86_64.exe (NSIS installer)
 REM
 REM Usage: npm run dist:win
 REM Requires: NSIS (makensis), node_modules/electron, Node.js >= 24
@@ -22,7 +22,7 @@ if errorlevel 1 (
 
 set OUTPUT_DIR=release
 set STAGE_DIR=%OUTPUT_DIR%\stage
-set INSTALLER=%OUTPUT_DIR%\Canbox-Setup-win-x64.exe
+set INSTALLER=%OUTPUT_DIR%\Canbox-Setup-x86_64.exe
 
 echo ====== Canbox Windows Build ======
 
