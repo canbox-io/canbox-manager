@@ -241,9 +241,21 @@ jobs:
         working-directory: canbox-manager
         run: |
           $installer = "release\Canbox-Setup-x86_64.exe"
+          Write-Host "=== Current directory: $(Get-Location) ==="
+          Write-Host "=== release\ directory contents ==="
+          if (Test-Path "release") {
+            Get-ChildItem release -Recurse | Select-Object FullName, Length
+          } else {
+            Write-Host "release\ directory DOES NOT EXIST"
+          }
+          Write-Host "=== All .exe files under working dir ==="
+          Get-ChildItem -Path . -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
+          Write-Host "=== All .nsi files under working dir ==="
+          Get-ChildItem -Path . -Filter "*.nsi" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+          Write-Host "=== makensis location ==="
+          Get-Command makensis -ErrorAction SilentlyContinue | Select-Object Source
           if (-not (Test-Path $installer)) {
             Write-Error "Installer not found: $installer"
-            Get-ChildItem release -ErrorAction SilentlyContinue
             exit 1
           }
           $size = (Get-Item $installer).Length / 1MB

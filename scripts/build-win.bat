@@ -26,6 +26,9 @@ set INSTALLER=%OUTPUT_DIR%\Canbox-Setup-x86_64.exe
 
 echo ====== Canbox Windows Build ======
 
+REM Ensure output dir exists
+if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
+
 REM 1. Build manager frontend
 echo [1/5] Build manager frontend (vite build)...
 call npm run build
@@ -119,6 +122,12 @@ makensis /V2 scripts\installer.nsi
 if errorlevel 1 (
     echo ERROR: NSIS compile failed >&2
     rmdir /s /q "%STAGE_DIR%"
+    exit /b 1
+)
+
+if not exist "%INSTALLER%" (
+    echo ERROR: Installer not created: %INSTALLER% >&2
+    dir "%OUTPUT_DIR%"
     exit /b 1
 )
 
