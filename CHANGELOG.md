@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.4] - 2026-09-07
+
+### feat | 新功能 / Features
+
+新增 Windows 系统下的 electron 签名支持
+- 安装时自动对 electron 运行时进行签名，通过 Windows 安全校验
+- 解决 Windows 11 24H2+ 版本中 APP 启动缓慢的问题（此前需等待数秒白屏）
+- 对用户完全透明，安装后即生效
+
+Added electron signing support for Windows
+- Automatically signs the electron runtime during installation to pass Windows security verification
+- Resolves slow APP startup on Windows 11 24H2+ (previously several seconds of white screen)
+- Fully transparent to users, takes effect immediately after install
+
 ## [0.2.3] - 2026-08-25
 
 ### refactor | 重构 / Refactoring
