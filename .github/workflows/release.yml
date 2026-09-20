@@ -119,6 +119,17 @@ jobs:
           SF_USER: ${{ secrets.SOURCEFORGE_USERNAME }}
         run: |
           set -euo pipefail
+
+          # === 前置校验：确认 secrets 已配置 ===
+          if [ -z "$SF_SSH_KEY" ]; then
+            echo "::error::SOURCEFORGE_SSH_KEY secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+            exit 1
+          fi
+          if [ -z "$SF_USER" ]; then
+            echo "::error::SOURCEFORGE_USERNAME secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
           # 使用 echo 写入 SSH 密钥，并规范化行尾符
           echo "$SF_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
@@ -314,6 +325,17 @@ jobs:
           SF_USER: ${{ secrets.SOURCEFORGE_USERNAME }}
         run: |
           set -euo pipefail
+
+          # === 前置校验：确认 secrets 已配置 ===
+          if [ -z "$SF_SSH_KEY" ]; then
+            echo "::error::SOURCEFORGE_SSH_KEY secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+            exit 1
+          fi
+          if [ -z "$SF_USER" ]; then
+            echo "::error::SOURCEFORGE_USERNAME secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
           # 使用 echo 写入 SSH 密钥，并规范化行尾符
           echo "$SF_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
