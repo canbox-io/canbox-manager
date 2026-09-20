@@ -115,30 +115,30 @@ jobs:
 
       - name: Upload to SourceForge (Linux)
         env:
-          SF_SSH_KEY: ${{ secrets.SOURCEFORGE_SSH_KEY }}
-          SF_USER: ${{ secrets.SOURCEFORGE_USERNAME }}
+          SFTP_PRIVATE_KEY: ${{ secrets.SFTP_PRIVATE_KEY }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
         run: |
           set -euo pipefail
 
           # === 前置校验：确认 secrets 已配置 ===
-          if [ -z "$SF_SSH_KEY" ]; then
-            echo "::error::SOURCEFORGE_SSH_KEY secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+          if [ -z "$SFTP_PRIVATE_KEY" ]; then
+            echo "::error::SFTP_PRIVATE_KEY secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
             exit 1
           fi
-          if [ -z "$SF_USER" ]; then
-            echo "::error::SOURCEFORGE_USERNAME secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+          if [ -z "$SFTP_USER" ]; then
+            echo "::error::SFTP_USER secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
             exit 1
           fi
 
           mkdir -p ~/.ssh
-          # 使用 echo 写入 SSH 密钥，并规范化行尾符
-          echo "$SF_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          # 用 printf '%s' 写私钥（不加多余换行，保留原格式）
+          printf '%s' "$SFTP_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
           # username 与 project 用逗号分隔作为 SSH user 部分
           scp -o StrictHostKeyChecking=no -o BatchMode=yes \
             canbox-manager/release/*.sh \
-            "${SF_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
+            "${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
 
   release-windows:
     runs-on: windows-latest
@@ -321,26 +321,26 @@ jobs:
         # windows-latest 自带 Git for Windows，内含 scp/ssh
         shell: bash
         env:
-          SF_SSH_KEY: ${{ secrets.SOURCEFORGE_SSH_KEY }}
-          SF_USER: ${{ secrets.SOURCEFORGE_USERNAME }}
+          SFTP_PRIVATE_KEY: ${{ secrets.SFTP_PRIVATE_KEY }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
         run: |
           set -euo pipefail
 
           # === 前置校验：确认 secrets 已配置 ===
-          if [ -z "$SF_SSH_KEY" ]; then
-            echo "::error::SOURCEFORGE_SSH_KEY secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+          if [ -z "$SFTP_PRIVATE_KEY" ]; then
+            echo "::error::SFTP_PRIVATE_KEY secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
             exit 1
           fi
-          if [ -z "$SF_USER" ]; then
-            echo "::error::SOURCEFORGE_USERNAME secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
+          if [ -z "$SFTP_USER" ]; then
+            echo "::error::SFTP_USER secret 为空，请在仓库 Settings > Secrets > Actions 中配置"
             exit 1
           fi
 
           mkdir -p ~/.ssh
-          # 使用 echo 写入 SSH 密钥，并规范化行尾符
-          echo "$SF_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          # 用 printf '%s' 写私钥（不加多余换行，保留原格式）
+          printf '%s' "$SFTP_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
           scp -o StrictHostKeyChecking=no -o BatchMode=yes \
             canbox-manager/release/*.exe \
-            "${SF_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
+            "${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
