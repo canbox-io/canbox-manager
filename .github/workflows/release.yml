@@ -114,14 +114,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to SourceForge (Linux)
+        env:
+          SF_SSH_KEY: ${{ secrets.SOURCEFORGE_SSH_KEY }}
+          SF_USER: ${{ secrets.SOURCEFORGE_USERNAME }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.SOURCEFORGE_SSH_KEY }}" > ~/.ssh/id_ed25519
+          # 用 printf 写私钥，保留多行；ssh 对格式敏感
+          printf '%s\n' "$SF_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts
-          scp -o StrictHostKeyChecking=no \
+          ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
+          # username 与 project 用逗号分隔作为 SSH user 部分
+          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
             canbox-manager/release/*.sh \
-            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/
+            "${SF_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
 
   release-windows:
     runs-on: windows-latest
@@ -300,15 +306,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to SourceForge (Windows)
-        shell: pwsh
+        # 用 bash 替代 pwsh：避免 PowerShell 把 @frs 当作 splatting 运算符
+        # windows-latest 自带 Git for Windows，内含 scp/ssh
+        shell: bash
+        env:
+          SF_SSH_KEY: ${{ secrets.SOURCEFORGE_SSH_KEY }}
+          SF_USER: ${{ secrets.SOURCEFORGE_USERNAME }}
         run: |
-          $sshDir = "$env:USERPROFILE\.ssh"
-          if (-not (Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir | Out-Null }
-          @'
-          ${{ secrets.SOURCEFORGE_SSH_KEY }}
-          '@ | Out-File -FilePath "$sshDir\id_ed25519" -Encoding utf8
-          icacls "$sshDir\id_ed25519" /inheritance:r /grant:r "$($env:USERNAME):(R)" | Out-Null
-          ssh-keyscan -H frs.sourceforge.net >> "$sshDir\known_hosts" 2>$null
-          scp -o StrictHostKeyChecking=no `
-            canbox-manager\release\*.exe `
-            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SF_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
+          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
+            canbox-manager/release/*.exe \
+            "${SF_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
