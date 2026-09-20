@@ -120,8 +120,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          # 用 printf 写私钥，保留多行；ssh 对格式敏感
-          printf '%s\n' "$SF_SSH_KEY" > ~/.ssh/id_ed25519
+          # 使用 echo 写入 SSH 密钥，并规范化行尾符
+          echo "$SF_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
           # username 与 project 用逗号分隔作为 SSH user 部分
@@ -315,7 +315,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          printf '%s\n' "$SF_SSH_KEY" > ~/.ssh/id_ed25519
+          # 使用 echo 写入 SSH 密钥，并规范化行尾符
+          echo "$SF_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
           scp -o StrictHostKeyChecking=no -o BatchMode=yes \
