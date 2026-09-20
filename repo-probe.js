@@ -102,6 +102,43 @@ function getRawUrl(repoUrl, branch, file) {
 }
 
 /**
+ * 构造仓库站点（web）文件浏览基址，用于 README 中非 markdown 相对链接的“在仓库打开”
+ * 与 getRawUrl 对称：github /blob、gitee /blob、gitlab /-/blob
+ */
+function getWebBaseUrl(repoUrl, branch) {
+    const info = parseRepo(repoUrl);
+    if (!info) return `${normalizeRepoUrl(repoUrl)}/blob/${branch}`;
+    switch (info.platform) {
+        case 'github':
+            return `https://github.com/${info.owner}/${info.repo}/blob/${branch}`;
+        case 'gitee':
+            return `https://gitee.com/${info.owner}/${info.repo}/blob/${branch}`;
+        case 'gitlab':
+            return `${info.raw}/-/blob/${branch}`;
+        default:
+            return `${info.raw}/blob/${branch}`;
+    }
+}
+
+/**
+ * 构造 README 渲染所需的平台归一化上下文
+ * rawBase 用于图片等相对资源，webBase 用于“在仓库打开”
+ * @returns {{platform:string, owner:string, repo:string, branch:string, rawBase:string, webBase:string}|null}
+ */
+function getRepoContext(repoUrl, branch) {
+    const info = parseRepo(repoUrl);
+    if (!info) return null;
+    return {
+        platform: info.platform,
+        owner: info.owner,
+        repo: info.repo,
+        branch,
+        rawBase: getRawUrl(repoUrl, branch, '').replace(/\/$/, ''),
+        webBase: getWebBaseUrl(repoUrl, branch)
+    };
+}
+
+/**
  * 构造 release API URL
  */
 function getReleaseApiUrl(repoUrl, tag) {
@@ -502,6 +539,8 @@ module.exports = {
     parseRepo,
     detectDefaultBranch,
     getRawUrl,
+    getWebBaseUrl,
+    getRepoContext,
     getReleaseDownloadUrl,
     probeRepo,
     downloadFile

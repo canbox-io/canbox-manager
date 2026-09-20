@@ -72,7 +72,8 @@ md.renderer.rules.image = function(tokens, idx, options, env, self) {
         if (src && !/^(https?:)?\/\//i.test(src) && !/^[a-z][a-z0-9+.-]*:/i.test(src)) {
             const ctx = readmeContext.value;
             const resolved = resolveReadmePath(src, ctx.currentPath || 'README.md');
-            token.attrs[srcIndex][1] = `https://raw.githubusercontent.com/${ctx.owner}/${ctx.repo}/${ctx.branch || 'main'}/${resolved || src}`;
+            // rawBase 由主进程按平台归一化返回（GitHub/Gitee/...）
+            token.attrs[srcIndex][1] = `${ctx.rawBase}/${resolved || src}`;
         }
     }
     return defaultImage(tokens, idx, options, env, self);
@@ -166,7 +167,8 @@ function onReadmeClick(e) {
     if (resolved && isMarkdownPath(resolved)) {
         loadReadmePath(resolved);
     } else {
-        const url = `https://github.com/${readmeContext.value.owner}/${readmeContext.value.repo}/blob/${readmeContext.value.branch || 'main'}/${resolved || href}`;
+        // webBase 由主进程按平台归一化返回（GitHub/Gitee/...）
+        const url = `${readmeContext.value.webBase}/${resolved || href}`;
         openExternal(url);
     }
 }
@@ -319,18 +321,6 @@ async function handleInstall(repo) {
     }
 }
 
-function parseRepoUrl(repoUrl) {
-    try {
-        const u = new URL(repoUrl);
-        if (u.hostname !== 'github.com') return null;
-        const parts = u.pathname.split('/').filter(Boolean);
-        if (parts.length < 2) return null;
-        return { owner: parts[0], repo: parts[1].replace(/\.git$/, '') };
-    } catch {
-        return null;
-    }
-}
-
 async function openRepoReadme(repo) {
     showReadmeDrawer.value = true;
     readmeLoading.value = true;
@@ -338,20 +328,24 @@ async function openRepoReadme(repo) {
     readmeContent.value = '';
     readmeHistory.value = [];
     readmeTitle.value = repo.name;
-    const parsed = parseRepoUrl(repo.url);
-    readmeContext.value = parsed ? {
-        kind: 'repo',
-        appName: repo.name,
-        repoUrl: repo.url,
-        owner: parsed.owner,
-        repo: parsed.repo,
-        branch: repo.branch || 'main',
-        currentPath: 'README.md'
-    } : null;
+    readmeContext.value = null;
     const result = await reposStore.getReadme(repo.id);
     readmeLoading.value = false;
     if (result.success) {
         readmeContent.value = result.readme || '';
+        // owner/repo/branch/rawBase/webBase 一律由主进程归一化返回，渲染层不解析平台
+        readmeContext.value = {
+            kind: 'repo',
+            appName: repo.name,
+            repoUrl: repo.url,
+            owner: result.owner,
+            repo: result.repo,
+            branch: result.branch || repo.branch || 'main',
+            platform: result.platform,
+            rawBase: result.rawBase,
+            webBase: result.webBase,
+            currentPath: 'README.md'
+        };
     } else {
         readmeError.value = result.error;
     }
@@ -419,23 +413,24 @@ async function openCatalogAppReadme(app) {
     readmeContent.value = '';
     readmeHistory.value = [];
     readmeTitle.value = app.name;
-    const parsed = parseRepoUrl(app.repo);
-    readmeContext.value = parsed ? {
-        kind: 'catalog',
-        appName: app.name,
-        repoUrl: app.repo,
-        owner: parsed.owner,
-        repo: parsed.repo,
-        branch: 'main',
-        currentPath: 'README.md'
-    } : null;
+    readmeContext.value = null;
     const result = await catalogStore.fetchReadme(app.repo);
     readmeLoading.value = false;
     if (result && result.success) {
         readmeContent.value = result.readme || '';
-        if (readmeContext.value && result.branch) {
-            readmeContext.value = { ...readmeContext.value, branch: result.branch };
-        }
+        // 与 openRepoReadme 同理：归一化字段全部来自主进程
+        readmeContext.value = {
+            kind: 'catalog',
+            appName: app.name,
+            repoUrl: app.repo,
+            owner: result.owner,
+            repo: result.repo,
+            branch: result.branch || 'main',
+            platform: result.platform,
+            rawBase: result.rawBase,
+            webBase: result.webBase,
+            currentPath: 'README.md'
+        };
     } else {
         readmeError.value = (result && result.error) || t('catalog.readmeFailed');
     }

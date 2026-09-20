@@ -1570,21 +1570,26 @@ ipcMain.handle('manager.repos.getReadme', async (_e, repoId) => {
         const repos = getAllRepos();
         const repo = repos[repoId];
         if (!repo) return { success: false, error: '仓库不存在' };
+        // README 渲染所需的平台归一化字段（owner/repo/branch/rawBase/webBase）统一由主进程给出，
+        // 渲染层不自行解析平台
+        const branch = repo.branch || 'main';
+        const ctx = repoProbe.getRepoContext(repo.url, branch) || {};
+        const base = { ...ctx, version: repo.version };
         // 兼容迁移期：若仍有内联 readme（旧版可能是 { text, statusCode, networkError } 对象），直接返回
         if (typeof repo.readme === 'string' && repo.readme.length > 0) {
-            return { success: true, readme: repo.readme, version: repo.version };
+            return { success: true, readme: repo.readme, ...base };
         }
         if (repo.readme && typeof repo.readme.text === 'string' && repo.readme.text.length > 0) {
-            return { success: true, readme: repo.readme.text, version: repo.version };
+            return { success: true, readme: repo.readme.text, ...base };
         }
         if (repo.readmeExt) {
             const readmePath = getReadmePath(repoId);
             if (fs.existsSync(readmePath)) {
                 const readme = fs.readFileSync(readmePath, 'utf-8');
-                return { success: true, readme, version: repo.version };
+                return { success: true, readme, ...base };
             }
         }
-        return { success: true, readme: '', version: repo.version };
+        return { success: true, readme: '', ...base };
     } catch (e) {
         return { success: false, error: e.message };
     }

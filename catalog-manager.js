@@ -15,6 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+// 平台解析复用 repo-probe（平台差异集中在 parseRepo / getRawUrl / getWebBaseUrl）
+const { parseRepo, getRawUrl, getRepoContext } = require('./repo-probe');
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/0.1.0';
 const REQUEST_TIMEOUT = 20000;
@@ -25,8 +27,16 @@ const BUILTIN_SOURCES = [
     {
         id: 'github-official',
         name: 'GitHub 官方',
-        url: 'https://raw.githubusercontent.com/canbox-io/canbox-catalog/main/data',
-        builtin: true
+        url: 'https://raw.githubusercontent.com/canbox-io/canbox-catalog/main/data/github',
+        builtin: true,
+        platform: 'github'
+    },
+    {
+        id: 'gitee-official',
+        name: 'Gitee 官方',
+        url: 'https://gitee.com/canbox-io/canbox-catalog/raw/main/data/gitee',
+        builtin: true,
+        platform: 'gitee'
     }
 ];
 
@@ -358,40 +368,42 @@ async function fetchCatalog(sourceId, options = {}) {
     };
 }
 
-function parseGitHubRepo(repoUrl) {
-    let parsed;
-    try {
-        parsed = new URL(repoUrl);
-    } catch (e) {
-        throw new Error('仓库地址无效');
-    }
-    if (parsed.hostname !== 'github.com') {
-        throw new Error('当前仅支持查看 GitHub 仓库的 README');
-    }
-    const parts = parsed.pathname.split('/').filter(Boolean);
-    if (parts.length < 2) throw new Error('仓库地址无效');
-    return { owner: parts[0], repo: parts[1].replace(/\.git$/, '') };
+/**
+ * 按平台构造 raw URL 拉取文本文件（平台差异由 repo-probe.getRawUrl 承担）
+ * @returns {Promise<string|null>} 200 时返回文本，其余返回 null
+ */
+async function fetchRawText(repoUrl, branch, filePath) {
+    const url = getRawUrl(repoUrl, branch, filePath);
+    const res = await axios.get(url, {
+        timeout: REQUEST_TIMEOUT,
+        headers: { 'User-Agent': UA },
+        responseType: 'text',
+        transformResponse: [d => d],
+        validateStatus: s => s >= 200 && s < 400
+    });
+    return res.status === 200 ? res.data : null;
 }
 
 /**
- * 获取 GitHub 仓库 README.md（main → master 回退），返回 markdown 原文。
+ * 获取仓库 README.md（main → master 回退），返回 markdown 原文。
+ * 返回体带平台归一化字段：platform / owner / repo / branch / rawBase / webBase
  */
 async function getReadme(repoUrl) {
-    const { owner, repo } = parseGitHubRepo(repoUrl);
+    const info = parseRepo(repoUrl);
+    if (!info) throw new Error('仓库地址无效');
     const branches = ['main', 'master'];
     let lastError = null;
     for (const branch of branches) {
-        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/README.md`;
         try {
-            const res = await axios.get(url, {
-                timeout: REQUEST_TIMEOUT,
-                headers: { 'User-Agent': UA },
-                responseType: 'text',
-                transformResponse: [d => d],
-                validateStatus: s => s >= 200 && s < 400
-            });
-            if (res.status === 200) {
-                return { success: true, readme: res.data, repoName: `${owner}/${repo}`, branch, owner, repo };
+            const text = await fetchRawText(repoUrl, branch, 'README.md');
+            if (text !== null) {
+                const ctx = getRepoContext(repoUrl, branch);
+                return {
+                    success: true,
+                    readme: text,
+                    repoName: `${info.owner}/${info.repo}`,
+                    ...ctx
+                };
             }
         } catch (e) {
             lastError = e;
@@ -401,11 +413,13 @@ async function getReadme(repoUrl) {
 }
 
 /**
- * 获取 GitHub 仓库内指定分支/路径的 markdown 文件（用于 README 中的相对链接跳转）。
+ * 获取仓库内指定分支/路径的 markdown 文件（用于 README 中的相对链接跳转）。
  * 若未指定 branch，则依次尝试 main、master。
+ * 返回体同 getReadme，带 platform / rawBase / webBase。
  */
 async function getRepoMarkdown(repoUrl, filePath, branch) {
-    const { owner, repo } = parseGitHubRepo(repoUrl);
+    const info = parseRepo(repoUrl);
+    if (!info) throw new Error('仓库地址无效');
     const cleanPath = String(filePath || '').replace(/^\/+/, '');
     if (!cleanPath) throw new Error('文件路径无效');
     const branches = [];
@@ -415,17 +429,17 @@ async function getRepoMarkdown(repoUrl, filePath, branch) {
     }
     let lastError = null;
     for (const b of branches) {
-        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${b}/${cleanPath}`;
         try {
-            const res = await axios.get(url, {
-                timeout: REQUEST_TIMEOUT,
-                headers: { 'User-Agent': UA },
-                responseType: 'text',
-                transformResponse: [d => d],
-                validateStatus: s => s >= 200 && s < 400
-            });
-            if (res.status === 200) {
-                return { success: true, readme: res.data, repoName: `${owner}/${repo}`, branch: b, path: cleanPath };
+            const text = await fetchRawText(repoUrl, b, cleanPath);
+            if (text !== null) {
+                const ctx = getRepoContext(repoUrl, b);
+                return {
+                    success: true,
+                    readme: text,
+                    repoName: `${info.owner}/${info.repo}`,
+                    path: cleanPath,
+                    ...ctx
+                };
             }
         } catch (e) {
             lastError = e;
