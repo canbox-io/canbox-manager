@@ -121,7 +121,7 @@ jobs:
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts
           scp -o StrictHostKeyChecking=no \
             canbox-manager/release/*.sh \
-            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/linux/
+            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/
 
   release-windows:
     runs-on: windows-latest
@@ -311,4 +311,4 @@ jobs:
           ssh-keyscan -H frs.sourceforge.net >> "$sshDir\known_hosts" 2>$null
           scp -o StrictHostKeyChecking=no `
             canbox-manager\release\*.exe `
-            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/windows/
+            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/
