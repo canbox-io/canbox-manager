@@ -4,6 +4,26 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.5] - 2026-09-20
+
+### feat | 新功能 / Features
+
+支持 Gitee 仓库 README 渲染：统一由主进程通过 repo-probe 归一化返回 platform/owner/repo/branch/rawBase/webBase 字段，渲染层不再自行解析平台
+新增 `getWebBaseUrl` 与 `getRepoContext` 接口
+新增 Gitee 官方目录源
+
+Add Gitee repo README rendering: unify normalization via repo-probe in main process returning platform/owner/repo/branch/rawBase/webBase fields, renderer no longer parses platform itself
+Add `getWebBaseUrl` and `getRepoContext` APIs
+Add official Gitee catalog source
+
+### ci | 持续集成 / Continuous Integration
+
+新增 GitHub Release 后的 SourceForge FRS 上传步骤，产物（Linux 与 Windows installer）与 GitHub Releases 并行分发至 SourceForge（同步 Gitee 镜像站点下载）
+修正 SourceForge 上传路径：去掉 `/linux/`、`/windows/` 子目录，产物直接覆盖上传到项目根目录（靠文件名区分平台），与 `site-config.js` 固定直链形态保持一致
+
+Add SourceForge FRS upload step after GitHub Release, distribute Linux and Windows installer to SourceForge in parallel with GitHub Releases (mirror for Gitee site downloads)
+Fix SourceForge upload path: remove `/linux/` and `/windows/` subdirectories, upload artifacts directly to project root (distinguished by filename), aligned with fixed-URL form in `site-config.js`
+
 ## [0.2.4] - 2026-09-07
 
 ### feat | 新功能 / Features
