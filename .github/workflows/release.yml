@@ -113,6 +113,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Upload to SourceForge (Linux)
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SOURCEFORGE_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts
+          scp -o StrictHostKeyChecking=no \
+            canbox-manager/release/*.sh \
+            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/linux/
+
   release-windows:
     runs-on: windows-latest
     steps:
@@ -288,3 +298,17 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to SourceForge (Windows)
+        shell: pwsh
+        run: |
+          $sshDir = "$env:USERPROFILE\.ssh"
+          if (-not (Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir | Out-Null }
+          @'
+          ${{ secrets.SOURCEFORGE_SSH_KEY }}
+          '@ | Out-File -FilePath "$sshDir\id_ed25519" -Encoding utf8
+          icacls "$sshDir\id_ed25519" /inheritance:r /grant:r "$($env:USERNAME):(R)" | Out-Null
+          ssh-keyscan -H frs.sourceforge.net >> "$sshDir\known_hosts" 2>$null
+          scp -o StrictHostKeyChecking=no `
+            canbox-manager\release\*.exe `
+            canbox-manager,${{ secrets.SOURCEFORGE_USERNAME }}@frs.sourceforge.net:/home/frs/project/canbox-manager/windows/
