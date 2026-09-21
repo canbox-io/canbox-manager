@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.6] - 2026-09-21
+
+### refactor | 重构 / Refactoring
+
+调整内置目录数据源地址：GitHub 官方源改用 `canbox-catalog-data` 仓库，Gitee 官方源改用其 Gitee 镜像仓库，数据获取统一走各平台独立的数据工程目录
+数据源地址不再内嵌平台子目录（`data/github`、`data/gitee`），改由各平台独立数据仓库在根目录提供
+
+Update builtin catalog source URLs: the GitHub official source now uses the `canbox-catalog-data` repository, and the Gitee official source uses its Gitee mirror, so catalog data is fetched from each platform's standalone data project
+Source URLs no longer embed platform subdirectories (`data/github`, `data/gitee`); each platform's data repository serves them from its root
+
 ## [0.2.5] - 2026-09-20
 
 ### feat | 新功能 / Features
