@@ -27,14 +27,14 @@ const BUILTIN_SOURCES = [
     {
         id: 'github-official',
         name: 'GitHub 官方',
-        url: 'https://raw.githubusercontent.com/canbox-io/canbox-catalog/main/data/github',
+        url: 'https://raw.githubusercontent.com/canbox-io/canbox-catalog-data/main',
         builtin: true,
         platform: 'github'
     },
     {
         id: 'gitee-official',
         name: 'Gitee 官方',
-        url: 'https://gitee.com/canbox-io/canbox-catalog/raw/main/data/gitee',
+        url: 'https://gitee.com/canbox-io/canbox-catalog-data/raw/main',
         builtin: true,
         platform: 'gitee'
     }
