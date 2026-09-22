@@ -4,7 +4,7 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
-## [0.2.6] - 2026-09-21
+## [0.2.6] - 2026-09-22
 
 ### refactor | 重构 / Refactoring
 
@@ -13,6 +13,12 @@
 
 Update builtin catalog source URLs: the GitHub official source now uses the `canbox-catalog-data` repository, and the Gitee official source uses its Gitee mirror, so catalog data is fetched from each platform's standalone data project
 Source URLs no longer embed platform subdirectories (`data/github`, `data/gitee`); each platform's data repository serves them from its root
+
+### chore | 维护 / Maintenance
+
+移除 Gitee 官方内置源
+
+Remove Gitee official builtin catalog source
 
 ## [0.2.5] - 2026-09-20
 
