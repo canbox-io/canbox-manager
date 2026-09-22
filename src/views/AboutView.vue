@@ -157,7 +157,7 @@ async function doUpdate() {
                     <img :src="logoUrl" :alt="$t('app.name')" class="hero-logo" />
                 </div>
                 <h1 class="hero-name">{{ $t('app.name') }}</h1>
-                <p class="hero-version">v{{ $t('app.version') }}</p>
+                <p class="hero-version">v{{ appVersion }}</p>
             </div>
 
             <!-- 更新检查 -->
