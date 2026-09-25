@@ -18,7 +18,11 @@ const pkg = require('./package.json');
 // manager 自身的 GitHub 仓库（owner/repo）
 const UPDATE_REPO = 'canbox-io/canbox-manager';
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/' + pkg.version;
-const TIMEOUT = 15000;
+// 5s 超时：SourceForge / GitHub API / 镜像探测共用，慢源由并发竞速自然淘汰
+const TIMEOUT = 5000;
+
+// SourceForge 项目下载根（latest-{platform}.json 与版本子目录均位于其下）
+const SOURCEFORGE_BASE_URL = 'https://downloads.sourceforge.net/project/canbox-manager';
 
 // GitHub 代理列表（与 repo-probe.js 一致，用于加速 API 和下载）
 const GITHUB_MIRRORS = [
@@ -106,75 +110,118 @@ function getPlatformAssetName() {
 }
 
 /**
+ * 获取 SourceForge latest-{platform}.json 的 URL
+ * 加 ?t=<timestamp> 防 sourceforge CDN 边缘缓存命中旧版本
+ */
+function getSourceforgeMetadataUrl() {
+    const platform = process.platform === 'win32' ? 'win' : 'linux';
+    return `${SOURCEFORGE_BASE_URL}/latest-${platform}.json?t=${Date.now()}`;
+}
+
+/**
+ * 通过 SourceForge 元数据检查更新
+ * 返回结构与 checkUpdateViaGithub 完全一致，便于 Promise.any 竞速
+ */
+async function checkUpdateViaSourceforge() {
+    const url = getSourceforgeMetadataUrl();
+    console.log('[updater] checkUpdateViaSourceforge: url=%s', url);
+    const resp = await axios.get(url, {
+        timeout: TIMEOUT,
+        headers: { 'User-Agent': UA }
+    });
+    const data = resp.data;
+    if (!data || !data.version || !data.asset || !data.asset.url) {
+        throw new Error('SourceForge metadata invalid: missing version/asset.url');
+    }
+    const latestVersion = data.version.replace(/^v/, '');
+    const currentVersion = pkg.version;
+    const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+    console.log('[updater] checkUpdateViaSourceforge: latestVersion=%s currentVersion=%s hasUpdate=%s',
+        latestVersion, currentVersion, hasUpdate);
+    return {
+        hasUpdate,
+        currentVersion,
+        latestVersion,
+        downloadUrl: data.asset.url,
+        releaseNotes: data.releaseNotes || '',
+        releaseUrl: data.releaseUrl || ''
+    };
+}
+
+/**
+ * 通过 GitHub API 检查更新（原 checkUpdate 逻辑抽离）
+ * 直连 api.github.com，失败抛错由 Promise.any 兜底
+ */
+async function checkUpdateViaGithub() {
+    const apiUrl = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+    const assetName = getPlatformAssetName();
+    console.log('[updater] checkUpdateViaGithub: url=%s assetName=%s', apiUrl, assetName);
+
+    const resp = await axios.get(apiUrl, {
+        timeout: TIMEOUT,
+        headers: {
+            'User-Agent': UA,
+            'Accept': 'application/vnd.github+json'
+        }
+    });
+    const data = resp.data;
+    if (!data || !data.tag_name) {
+        throw new Error('GitHub API response missing tag_name');
+    }
+
+    const latestVersion = data.tag_name.replace(/^v/, '');
+    const currentVersion = pkg.version;
+    const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+    console.log('[updater] checkUpdateViaGithub: latestVersion=%s currentVersion=%s hasUpdate=%s',
+        latestVersion, currentVersion, hasUpdate);
+
+    // 查找当前平台的安装包资产
+    const assets = data.assets || [];
+    const asset = assets.find(a => a.name === assetName);
+    if (!asset) {
+        console.log('[updater] checkUpdateViaGithub: asset not found, assetName=%s assets=%j', assetName, assets.map(a => a.name));
+    }
+
+    return {
+        hasUpdate,
+        currentVersion,
+        latestVersion,
+        downloadUrl: asset ? asset.browser_download_url : null,
+        releaseNotes: data.body || '',
+        releaseUrl: data.html_url || ''
+    };
+}
+
+/**
  * 检查更新
  *
- * 调用 GitHub Releases API 获取最新 release，与本地版本对比。
- * API 请求通过 GitHub 代理加速（与下载逻辑一致）。
+ * 并发竞速 SourceForge 与 GitHub API，谁先返回用谁：
+ * - 国内用户：SourceForge 通常 200-500ms 返回，GitHub API 5s 超时 → SF 赢
+ * - 国外用户：GitHub API 通常 100-300ms 返回，SourceForge 可能更慢 → GitHub 赢
+ * 两者都失败时返回聚合错误。
  *
  * @returns {Promise<Object>}
- *   { hasUpdate: true, currentVersion, latestVersion, downloadUrl, releaseNotes }
+ *   { hasUpdate: true, currentVersion, latestVersion, downloadUrl, releaseNotes, releaseUrl }
  *   { hasUpdate: false, currentVersion, latestVersion }
  *   { hasUpdate: false, error: string }
  */
 async function checkUpdate() {
-    console.log('[updater] checkUpdate: start, currentVersion=%s repo=%s', pkg.version, UPDATE_REPO);
-    const apiUrl = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
-    const assetName = getPlatformAssetName();
-    console.log('[updater] checkUpdate: platform=%s assetName=%s', process.platform, assetName);
+    console.log('[updater] checkUpdate: start, currentVersion=%s platform=%s', pkg.version, process.platform);
 
-    // GitHub API 不走镜像代理（镜像站只代理 github.com 下载资源，不代理 api.github.com）
-    // 直接直连 API，失败则返回错误
-    const candidates = [{ name: 'direct', url: apiUrl }];
-    console.log('[updater] checkUpdate: %d candidate lines (api direct only)', candidates.length);
-
-    let lastErr;
-    for (const candidate of candidates) {
-        try {
-            console.log('[updater] checkUpdate: trying line=%s', candidate.name);
-            const resp = await axios.get(candidate.url, {
-                timeout: TIMEOUT,
-                headers: {
-                    'User-Agent': UA,
-                    'Accept': 'application/vnd.github+json'
-                }
-            });
-            const data = resp.data;
-            if (!data || !data.tag_name) {
-                console.log('[updater] checkUpdate: line=%s response has no tag_name, skip', candidate.name);
-                continue;
-            }
-
-            const latestVersion = data.tag_name.replace(/^v/, '');
-            const currentVersion = pkg.version;
-            const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
-            console.log('[updater] checkUpdate: line=%s latestVersion=%s currentVersion=%s hasUpdate=%s',
-                candidate.name, latestVersion, currentVersion, hasUpdate);
-
-            // 查找当前平台的安装包资产
-            const assets = data.assets || [];
-            const asset = assets.find(a => a.name === assetName);
-            if (!asset) {
-                console.log('[updater] checkUpdate: asset not found, assetName=%s assets=%j', assetName, assets.map(a => a.name));
-            } else {
-                console.log('[updater] checkUpdate: asset found, downloadUrl=%s size=%d', asset.browser_download_url, asset.size);
-            }
-
-            return {
-                hasUpdate,
-                currentVersion,
-                latestVersion,
-                downloadUrl: asset ? asset.browser_download_url : null,
-                releaseNotes: data.body || '',
-                releaseUrl: data.html_url || ''
-            };
-        } catch (e) {
-            console.log('[updater] checkUpdate: line=%s failed: %s', candidate.name, e.message);
-            lastErr = e;
-        }
+    try {
+        const result = await Promise.any([
+            checkUpdateViaSourceforge(),
+            checkUpdateViaGithub()
+        ]);
+        console.log('[updater] checkUpdate: winner returned, hasUpdate=%s latestVersion=%s',
+            result.hasUpdate, result.latestVersion);
+        return result;
+    } catch (e) {
+        // Promise.any 全部失败时 e 是 AggregateError
+        const errors = e && e.errors ? e.errors.map(x => x.message).join('; ') : (e ? e.message : 'unknown');
+        console.error('[updater] checkUpdate: all sources failed, errors=%s', errors);
+        return { hasUpdate: false, error: '检查更新失败: ' + errors };
     }
-
-    console.error('[updater] checkUpdate: all candidates failed, error=%s', lastErr ? lastErr.message : 'unknown');
-    return { hasUpdate: false, error: lastErr ? lastErr.message : '检查更新失败' };
 }
 
 /**

@@ -130,15 +130,59 @@ jobs:
             exit 1
           fi
 
+          VERSION="${GITHUB_REF_NAME#v}"
+          INSTALLER="canbox-manager/release/Canbox-linux-x86_64.sh"
+          SF_BASE="${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager"
+
           mkdir -p ~/.ssh
           # 用 printf '%s' 写私钥（不加多余换行，保留原格式）
           printf '%s' "$SFTP_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
-          # username 与 project 用逗号分隔作为 SSH user 部分
+
+          # === 1. 创建版本子目录 ===
+          ssh -o StrictHostKeyChecking=no -o BatchMode=yes \
+            "${SFTP_USER},canbox-manager@frs.sourceforge.net" \
+            "mkdir -p /home/frs/project/canbox-manager/v${VERSION}"
+
+          # === 2. 上传安装包到版本子目录 ===
           scp -o StrictHostKeyChecking=no -o BatchMode=yes \
-            canbox-manager/release/*.sh \
-            "${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
+            "$INSTALLER" \
+            "${SF_BASE}/v${VERSION}/"
+
+          # === 3. 生成 latest-linux.json ===
+          # releaseNotes 用 jq -Rs 安全转义多行 markdown 为 JSON 字符串
+          RELEASE_NOTES_JSON=$(jq -Rs . < canbox-manager/changelog-extract.md)
+          SIZE=$(stat -c%s "$INSTALLER")
+          RELEASE_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg releaseDate "$RELEASE_DATE" \
+            --argjson releaseNotes "$RELEASE_NOTES_JSON" \
+            --arg releaseUrl "https://github.com/canbox-io/canbox-manager/releases/tag/v${VERSION}" \
+            --arg assetName "Canbox-linux-x86_64.sh" \
+            --arg assetUrl "https://downloads.sourceforge.net/project/canbox-manager/v${VERSION}/Canbox-linux-x86_64.sh" \
+            --argjson assetSize "$SIZE" \
+            '{
+              version: $version,
+              releaseDate: $releaseDate,
+              releaseNotes: $releaseNotes,
+              releaseUrl: $releaseUrl,
+              asset: {
+                name: $assetName,
+                url: $assetUrl,
+                size: $assetSize
+              }
+            }' > latest-linux.json
+
+          echo "=== latest-linux.json ==="
+          cat latest-linux.json
+
+          # === 4. 上传元数据到项目根 ===
+          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
+            latest-linux.json \
+            "${SF_BASE}/latest-linux.json"
 
   release-windows:
     runs-on: windows-latest
@@ -336,11 +380,57 @@ jobs:
             exit 1
           fi
 
+          VERSION="${GITHUB_REF_NAME#v}"
+          INSTALLER="canbox-manager/release/Canbox-Setup-x86_64.exe"
+          SF_BASE="${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager"
+
           mkdir -p ~/.ssh
           # 用 printf '%s' 写私钥（不加多余换行，保留原格式）
           printf '%s' "$SFTP_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
+
+          # === 1. 创建版本子目录 ===
+          ssh -o StrictHostKeyChecking=no -o BatchMode=yes \
+            "${SFTP_USER},canbox-manager@frs.sourceforge.net" \
+            "mkdir -p /home/frs/project/canbox-manager/v${VERSION}"
+
+          # === 2. 上传安装包到版本子目录 ===
           scp -o StrictHostKeyChecking=no -o BatchMode=yes \
-            canbox-manager/release/*.exe \
-            "${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager/"
+            "$INSTALLER" \
+            "${SF_BASE}/v${VERSION}/"
+
+          # === 3. 生成 latest-win.json ===
+          # releaseNotes 用 jq -Rs 安全转义多行 markdown 为 JSON 字符串
+          RELEASE_NOTES_JSON=$(jq -Rs . < canbox-manager/changelog-extract.md)
+          # Git Bash 提供 GNU coreutils，stat -c%s 可用
+          SIZE=$(stat -c%s "$INSTALLER")
+          RELEASE_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg releaseDate "$RELEASE_DATE" \
+            --argjson releaseNotes "$RELEASE_NOTES_JSON" \
+            --arg releaseUrl "https://github.com/canbox-io/canbox-manager/releases/tag/v${VERSION}" \
+            --arg assetName "Canbox-Setup-x86_64.exe" \
+            --arg assetUrl "https://downloads.sourceforge.net/project/canbox-manager/v${VERSION}/Canbox-Setup-x86_64.exe" \
+            --argjson assetSize "$SIZE" \
+            '{
+              version: $version,
+              releaseDate: $releaseDate,
+              releaseNotes: $releaseNotes,
+              releaseUrl: $releaseUrl,
+              asset: {
+                name: $assetName,
+                url: $assetUrl,
+                size: $assetSize
+              }
+            }' > latest-win.json
+
+          echo "=== latest-win.json ==="
+          cat latest-win.json
+
+          # === 4. 上传元数据到项目根 ===
+          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
+            latest-win.json \
+            "${SF_BASE}/latest-win.json"
