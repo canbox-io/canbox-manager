@@ -15,6 +15,28 @@ const os = require('os');
 const axios = require('axios');
 const pkg = require('./package.json');
 
+// 通过 canbox-core 注入的 logger（log4js），写入 {usersPath}/logs/canbox.log
+// 若 logger 未初始化（如开发环境直接 require），降级为 console
+// 注意：不在模块加载时获取，而是每次使用时动态获取——
+// 因为 injection.js 的 logger.init() 在 app.whenReady() 之后异步执行，
+// 模块加载时 logger 尚未就绪
+function _getLogger() {
+    try {
+        // 与 main.js 一致：通过 global.__CANBOX_CORE_PATH__ 获取 core 路径
+        // 不用 require('canbox-core/injection')，因为打包后 asar 无法解析该模块名
+        const corePath = global.__CANBOX_CORE_PATH__;
+        if (!corePath) return console;
+        const loggerModule = require(require('path').join(corePath, 'lib', 'logger'));
+        return loggerModule.get() || console;
+    } catch (_) {
+        return console;
+    }
+}
+const logger = {
+    info: (...args) => _getLogger().info(...args),
+    error: (...args) => _getLogger().error(...args)
+};
+
 // manager 自身的 GitHub 仓库（owner/repo）
 const UPDATE_REPO = 'canbox-io/canbox-manager';
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/' + pkg.version;
@@ -69,7 +91,7 @@ async function testMirrorLatency(mirror, originalUrl, timeout = 3000) {
  * 任一可用即返回，全部不可用则返回空列表（降级直连）
  */
 async function probeMirrors(originalUrl, timeout = 3000) {
-    console.log('[updater] probeMirrors: testing %d mirrors for %s', GITHUB_MIRRORS.length, originalUrl);
+    logger.info('[updater] probeMirrors: testing %d mirrors for %s', GITHUB_MIRRORS.length, originalUrl);
     const results = [];
     let resolved = false;
 
@@ -78,7 +100,7 @@ async function probeMirrors(originalUrl, timeout = 3000) {
             if (resolved) return;
             resolved = true;
             const available = results.filter(r => r.available).sort((a, b) => a.latency - b.latency);
-            console.log('[updater] probeMirrors: timeout reached, available=%d/%d', available.length, GITHUB_MIRRORS.length);
+            logger.info('[updater] probeMirrors: timeout reached, available=%d/%d', available.length, GITHUB_MIRRORS.length);
             resolve(available);
         }, timeout + 100);
 
@@ -87,11 +109,11 @@ async function probeMirrors(originalUrl, timeout = 3000) {
                 if (resolved) return;
                 results.push(r);
                 if (r.available) {
-                    console.log('[updater] probeMirrors: mirror=%s available latency=%dms', r.mirror.name, r.latency);
+                    logger.info('[updater] probeMirrors: mirror=%s available latency=%dms', r.mirror.name, r.latency);
                     resolved = true;
                     clearTimeout(timer);
                     const available = results.filter(x => x.available).sort((a, b) => a.latency - b.latency);
-                    console.log('[updater] probeMirrors: selected %d available mirrors', available.length);
+                    logger.info('[updater] probeMirrors: selected %d available mirrors', available.length);
                     resolve(available);
                 }
             });
@@ -124,7 +146,7 @@ function getSourceforgeMetadataUrl() {
  */
 async function checkUpdateViaSourceforge() {
     const url = getSourceforgeMetadataUrl();
-    console.log('[updater] checkUpdateViaSourceforge: url=%s', url);
+    logger.info('[updater] checkUpdateViaSourceforge: url=%s', url);
     const resp = await axios.get(url, {
         timeout: TIMEOUT,
         headers: { 'User-Agent': UA }
@@ -136,7 +158,7 @@ async function checkUpdateViaSourceforge() {
     const latestVersion = data.version.replace(/^v/, '');
     const currentVersion = pkg.version;
     const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
-    console.log('[updater] checkUpdateViaSourceforge: latestVersion=%s currentVersion=%s hasUpdate=%s',
+    logger.info('[updater] checkUpdateViaSourceforge: latestVersion=%s currentVersion=%s hasUpdate=%s',
         latestVersion, currentVersion, hasUpdate);
     return {
         hasUpdate,
@@ -155,7 +177,7 @@ async function checkUpdateViaSourceforge() {
 async function checkUpdateViaGithub() {
     const apiUrl = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
     const assetName = getPlatformAssetName();
-    console.log('[updater] checkUpdateViaGithub: url=%s assetName=%s', apiUrl, assetName);
+    logger.info('[updater] checkUpdateViaGithub: url=%s assetName=%s', apiUrl, assetName);
 
     const resp = await axios.get(apiUrl, {
         timeout: TIMEOUT,
@@ -172,14 +194,14 @@ async function checkUpdateViaGithub() {
     const latestVersion = data.tag_name.replace(/^v/, '');
     const currentVersion = pkg.version;
     const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
-    console.log('[updater] checkUpdateViaGithub: latestVersion=%s currentVersion=%s hasUpdate=%s',
+    logger.info('[updater] checkUpdateViaGithub: latestVersion=%s currentVersion=%s hasUpdate=%s',
         latestVersion, currentVersion, hasUpdate);
 
     // 查找当前平台的安装包资产
     const assets = data.assets || [];
     const asset = assets.find(a => a.name === assetName);
     if (!asset) {
-        console.log('[updater] checkUpdateViaGithub: asset not found, assetName=%s assets=%j', assetName, assets.map(a => a.name));
+        logger.info('[updater] checkUpdateViaGithub: asset not found, assetName=%s assets=%j', assetName, assets.map(a => a.name));
     }
 
     return {
@@ -206,20 +228,23 @@ async function checkUpdateViaGithub() {
  *   { hasUpdate: false, error: string }
  */
 async function checkUpdate() {
-    console.log('[updater] checkUpdate: start, currentVersion=%s platform=%s', pkg.version, process.platform);
+    logger.info('[updater] checkUpdate: start, currentVersion=%s platform=%s', pkg.version, process.platform);
+
+    // 包装 Promise，让 winner 信息随结果一起返回
+    const wrap = (name, fn) => fn().then(result => ({ name, result }));
 
     try {
-        const result = await Promise.any([
-            checkUpdateViaSourceforge(),
-            checkUpdateViaGithub()
+        const winner = await Promise.any([
+            wrap('sourceforge', checkUpdateViaSourceforge),
+            wrap('github', checkUpdateViaGithub)
         ]);
-        console.log('[updater] checkUpdate: winner returned, hasUpdate=%s latestVersion=%s',
-            result.hasUpdate, result.latestVersion);
-        return result;
+        logger.info('[updater] checkUpdate: winner=%s hasUpdate=%s latestVersion=%s downloadUrl=%s',
+            winner.name, winner.result.hasUpdate, winner.result.latestVersion, winner.result.downloadUrl);
+        return winner.result;
     } catch (e) {
         // Promise.any 全部失败时 e 是 AggregateError
         const errors = e && e.errors ? e.errors.map(x => x.message).join('; ') : (e ? e.message : 'unknown');
-        console.error('[updater] checkUpdate: all sources failed, errors=%s', errors);
+        logger.error('[updater] checkUpdate: all sources failed, errors=%s', errors);
         return { hasUpdate: false, error: '检查更新失败: ' + errors };
     }
 }
@@ -228,7 +253,7 @@ async function checkUpdate() {
  * 流式下载（带进度回调）
  */
 async function streamDownload(url, destPath, onProgress) {
-    console.log('[updater] streamDownload: url=%s dest=%s', url, destPath);
+    logger.info('[updater] streamDownload: url=%s dest=%s', url, destPath);
     const resp = await axios({
         method: 'get',
         url,
@@ -243,7 +268,7 @@ async function streamDownload(url, destPath, onProgress) {
     }
 
     const total = parseInt(resp.headers['content-length'] || '0', 10);
-    console.log('[updater] streamDownload: status=200 total=%d bytes', total);
+    logger.info('[updater] streamDownload: status=200 total=%d bytes', total);
     let received = 0;
     const writer = fs.createWriteStream(destPath);
 
@@ -257,17 +282,17 @@ async function streamDownload(url, destPath, onProgress) {
         resp.data.on('end', () => {
             writer.end();
             writer.on('finish', () => {
-                console.log('[updater] streamDownload: done, received=%d bytes', received);
+                logger.info('[updater] streamDownload: done, received=%d bytes', received);
                 resolve(destPath);
             });
         });
         resp.data.on('error', (err) => {
-            console.error('[updater] streamDownload: stream error: %s', err.message);
+            logger.error('[updater] streamDownload: stream error: %s', err.message);
             writer.destroy();
             reject(err);
         });
         writer.on('error', (err) => {
-            console.error('[updater] streamDownload: writer error: %s', err.message);
+            logger.error('[updater] streamDownload: writer error: %s', err.message);
             reject(err);
         });
         resp.data.pipe(writer);
@@ -287,17 +312,18 @@ async function streamDownload(url, destPath, onProgress) {
 async function downloadInstaller(downloadUrl, onProgress) {
     const assetName = getPlatformAssetName();
     const destPath = path.join(os.tmpdir(), assetName);
-    console.log('[updater] downloadInstaller: start, url=%s dest=%s', downloadUrl, destPath);
+    logger.info('[updater] downloadInstaller: start, url=%s dest=%s', downloadUrl, destPath);
 
     // 清理可能存在的旧文件
     try {
         if (fs.existsSync(destPath)) {
-            console.log('[updater] downloadInstaller: removing existing file %s', destPath);
+            logger.info('[updater] downloadInstaller: removing existing file %s', destPath);
             fs.unlinkSync(destPath);
         }
     } catch (e) { /* ignore */ }
 
     const isGithub = /^https?:\/\/[^/]*github\.com\//i.test(downloadUrl);
+    const isSourceforge = /sourceforge\.net/i.test(downloadUrl);
 
     // 构建候选线路：可用代理 + 直连兜底
     const candidates = [];
@@ -306,30 +332,32 @@ async function downloadInstaller(downloadUrl, onProgress) {
         for (const m of mirrors) {
             candidates.push({ name: m.mirror.name, url: `${m.mirror.url}/${downloadUrl}` });
         }
+    } else if (isSourceforge) {
+        logger.info('[updater] downloadInstaller: sourceforge url, direct download');
     } else {
-        console.log('[updater] downloadInstaller: non-github url, skip mirror probing');
+        logger.info('[updater] downloadInstaller: non-github url, skip mirror probing');
     }
-    candidates.push({ name: 'direct', url: downloadUrl });
-    console.log('[updater] downloadInstaller: %d candidate lines', candidates.length);
+    candidates.push({ name: isSourceforge ? 'sourceforge' : 'direct', url: downloadUrl });
+    logger.info('[updater] downloadInstaller: %d candidate lines', candidates.length);
 
     let lastErr;
     for (let i = 0; i < candidates.length; i++) {
         const candidate = candidates[i];
-        console.log('[updater] downloadInstaller: trying line=%s (%d/%d)', candidate.name, i + 1, candidates.length);
+        logger.info('[updater] downloadInstaller: trying line=%s (%d/%d)', candidate.name, i + 1, candidates.length);
         try {
             await streamDownload(candidate.url, destPath, onProgress);
             const stat = fs.statSync(destPath);
-            console.log('[updater] downloadInstaller: success, line=%s size=%d bytes path=%s', candidate.name, stat.size, destPath);
+            logger.info('[updater] downloadInstaller: success, line=%s size=%d bytes path=%s', candidate.name, stat.size, destPath);
             return destPath;
         } catch (e) {
-            console.error('[updater] downloadInstaller: line=%s failed: %s', candidate.name, e.message);
+            logger.error('[updater] downloadInstaller: line=%s failed: %s', candidate.name, e.message);
             lastErr = e;
             // 清理不完整文件
             try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) { /* ignore */ }
         }
     }
 
-    console.error('[updater] downloadInstaller: all candidates failed, error=%s', lastErr ? lastErr.message : 'unknown');
+    logger.error('[updater] downloadInstaller: all candidates failed, error=%s', lastErr ? lastErr.message : 'unknown');
     throw lastErr;
 }
 
@@ -342,26 +370,26 @@ async function downloadInstaller(downloadUrl, onProgress) {
  * @param {string} installerPath 安装包本地路径
  */
 function runInstallerAndQuit(installerPath) {
-    console.log('[updater] runInstallerAndQuit: installerPath=%s platform=%s', installerPath, process.platform);
+    logger.info('[updater] runInstallerAndQuit: installerPath=%s platform=%s', installerPath, process.platform);
     if (!fs.existsSync(installerPath)) {
-        console.error('[updater] runInstallerAndQuit: installer not found: %s', installerPath);
+        logger.error('[updater] runInstallerAndQuit: installer not found: %s', installerPath);
         throw new Error('安装包不存在: ' + installerPath);
     }
 
     let child;
     if (process.platform === 'win32') {
         // Windows: NSIS 安装包，启动时自动弹 UAC
-        console.log('[updater] runInstallerAndQuit: spawning Windows installer (NSIS UAC)');
+        logger.info('[updater] runInstallerAndQuit: spawning Windows installer (NSIS UAC)');
         child = spawn(installerPath, [], { detached: true, stdio: 'ignore' });
     } else {
         // Linux: .sh 自解压脚本需设置可执行权限
         // 传 --update 参数：非交互更新模式，自动探测已安装路径
-        console.log('[updater] runInstallerAndQuit: chmod +x and spawning bash installer with --update');
+        logger.info('[updater] runInstallerAndQuit: chmod +x and spawning bash installer with --update');
         fs.chmodSync(installerPath, 0o755);
         child = spawn('bash', [installerPath, '--update'], { detached: true, stdio: 'ignore' });
     }
     child.unref();
-    console.log('[updater] runInstallerAndQuit: installer spawned, pid=%s, quitting manager', child.pid);
+    logger.info('[updater] runInstallerAndQuit: installer spawned, pid=%s, quitting manager', child.pid);
 
     // 退出 manager，让安装程序完成覆盖
     app.quit();
