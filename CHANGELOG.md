@@ -4,6 +4,40 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.7] - 2026-09-25
+
+### feat | 新功能 / Features
+
+更新检查新增 SourceForge 镜像通道，与 GitHub 接口并发竞速自动选择最快来源，更新包亦经 SourceForge 下载，显著改善国内网络环境下的更新检查与下载体验
+新增侧边栏页面切换快捷键 Alt+1 ~ Alt+5，菜单项提示中展示对应快捷键，并在设置页新增“快捷键”栏目列出全部快捷键及说明
+
+Add a SourceForge mirror channel for update checks that races against the GitHub API and automatically uses the fastest source, with update packages also downloaded via SourceForge, greatly improving update-check and download experience for users in China
+Add Alt+1 ~ Alt+5 shortcuts for sidebar page navigation, show key hints in menu item tooltips, and add a "Shortcuts" section in Settings listing all shortcuts with descriptions
+
+### fix | 问题修复 / Bug Fixes
+
+关于页改用 appVersion 变量显示版本号
+
+Use the appVersion variable to display the version number on the About page
+
+### docs | 文档 / Documentation
+
+修正更新提示文案的位置错误
+
+Fix the incorrect placement of the update notice text
+
+### refactor | 重构 / Refactoring
+
+更新模块改用可注入的 logger 替代控制台日志，并重构更新检查逻辑
+
+Replace console logging in the updater module with an injectable logger, and refactor the update-check logic
+
+### chore | 维护 / Maintenance
+
+发布流水线支持将产物按版本子目录上传至 SourceForge，并自动生成各平台最新版本元数据文件
+
+Update the release pipeline to upload artifacts to SourceForge under per-version subdirectories and automatically generate per-platform latest-version metadata files
+
 ## [0.2.6] - 2026-09-22
 
 ### refactor | 重构 / Refactoring
