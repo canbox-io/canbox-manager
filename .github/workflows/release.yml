@@ -4,17 +4,25 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '目标版本 tag（如 v0.2.7），用于手动重跑发布与 SourceForge 上传'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.tag || github.ref }}
   cancel-in-progress: true
 
 jobs:
   release-linux:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       # checkout 为同级目录，满足 build-linux.sh 中 CORE_SRC="../canbox-core" 的路径假设
       - name: Checkout canbox-manager
@@ -94,7 +102,7 @@ jobs:
         working-directory: canbox-manager
         run: |
           # tag 形如 v0.1.2，CHANGELOG.md 中是 ## [0.1.2]，去掉 v 前缀
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           # 提取从 "## [版本号]" 到下一个 "## [" 之间的内容
           awk -v ver="$VERSION" '
             $0 ~ "^## \\[" ver "\\]" { found=1; print; next }
@@ -107,6 +115,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: canbox-manager/release/*.sh
           body_path: canbox-manager/changelog-extract.md
           generate_release_notes: true
@@ -130,9 +139,9 @@ jobs:
             exit 1
           fi
 
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           INSTALLER="canbox-manager/release/Canbox-linux-x86_64.sh"
-          SF_BASE="${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager"
+          SF_PATH="/home/frs/project/canbox-manager"
 
           mkdir -p ~/.ssh
           # 用 printf '%s' 写私钥（不加多余换行，保留原格式）
@@ -140,17 +149,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
 
-          # === 1. 创建版本子目录 ===
-          ssh -o StrictHostKeyChecking=no -o BatchMode=yes \
-            "${SFTP_USER},canbox-manager@frs.sourceforge.net" \
-            "mkdir -p /home/frs/project/canbox-manager/v${VERSION}"
-
-          # === 2. 上传安装包到版本子目录 ===
-          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
-            "$INSTALLER" \
-            "${SF_BASE}/v${VERSION}/"
-
-          # === 3. 生成 latest-linux.json ===
+          # === 1. 生成 latest-linux.json ===
           # releaseNotes 用 jq -Rs 安全转义多行 markdown 为 JSON 字符串
           RELEASE_NOTES_JSON=$(jq -Rs . < canbox-manager/changelog-extract.md)
           SIZE=$(stat -c%s "$INSTALLER")
@@ -179,13 +178,21 @@ jobs:
           echo "=== latest-linux.json ==="
           cat latest-linux.json
 
-          # === 4. 上传元数据到项目根 ===
-          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
-            latest-linux.json \
-            "${SF_BASE}/latest-linux.json"
+          # === 2. SFTP 批处理：创建版本子目录并上传安装包与元数据 ===
+          # frs.sourceforge.net 为受限 Shell 账户，仅允许 SFTP/SCP/Rsync 文件传输，
+          # 禁止 ssh 远程命令（如 mkdir），故全部操作走 sftp 批处理；
+          # 命令前加 '-' 表示忽略该命令错误（目录已存在时重跑不中断）
+          printf '%s\n' \
+            "-mkdir ${SF_PATH}/v${VERSION}" \
+            "put ${INSTALLER} ${SF_PATH}/v${VERSION}/Canbox-linux-x86_64.sh" \
+            "put latest-linux.json ${SF_PATH}/latest-linux.json" \
+            | sftp -o StrictHostKeyChecking=no -o BatchMode=yes -b - \
+                "${SFTP_USER},canbox-manager@frs.sourceforge.net"
 
   release-windows:
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       # checkout 为同级目录，满足 build-win.bat 中 CORE_SRC 的路径假设
       - name: Checkout canbox-manager
@@ -338,7 +345,7 @@ jobs:
         shell: pwsh
         run: |
           # tag 形如 v0.1.2，CHANGELOG.md 中是 ## [0.1.2]，去掉 v 前缀
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $version = $env:RELEASE_TAG -replace '^v', ''
           $content = Get-Content CHANGELOG.md -Raw
           # 匹配 ## [版本号] 到下一个 ## [ 之间（(?m) 让 ^ 匹配行首，(?s) 让 . 匹配换行）
           $pattern = "(?ms)## \[$([regex]::Escape($version))\].*?(?=^## \[|\z)"
@@ -354,6 +361,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: canbox-manager/release/*.exe
           body_path: canbox-manager/changelog-extract.md
           generate_release_notes: true
@@ -380,9 +388,9 @@ jobs:
             exit 1
           fi
 
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           INSTALLER="canbox-manager/release/Canbox-Setup-x86_64.exe"
-          SF_BASE="${SFTP_USER},canbox-manager@frs.sourceforge.net:/home/frs/project/canbox-manager"
+          SF_PATH="/home/frs/project/canbox-manager"
 
           mkdir -p ~/.ssh
           # 用 printf '%s' 写私钥（不加多余换行，保留原格式）
@@ -390,17 +398,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts 2>/dev/null
 
-          # === 1. 创建版本子目录 ===
-          ssh -o StrictHostKeyChecking=no -o BatchMode=yes \
-            "${SFTP_USER},canbox-manager@frs.sourceforge.net" \
-            "mkdir -p /home/frs/project/canbox-manager/v${VERSION}"
-
-          # === 2. 上传安装包到版本子目录 ===
-          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
-            "$INSTALLER" \
-            "${SF_BASE}/v${VERSION}/"
-
-          # === 3. 生成 latest-win.json ===
+          # === 1. 生成 latest-win.json ===
           # releaseNotes 用 jq -Rs 安全转义多行 markdown 为 JSON 字符串
           RELEASE_NOTES_JSON=$(jq -Rs . < canbox-manager/changelog-extract.md)
           # Git Bash 提供 GNU coreutils，stat -c%s 可用
@@ -430,7 +428,13 @@ jobs:
           echo "=== latest-win.json ==="
           cat latest-win.json
 
-          # === 4. 上传元数据到项目根 ===
-          scp -o StrictHostKeyChecking=no -o BatchMode=yes \
-            latest-win.json \
-            "${SF_BASE}/latest-win.json"
+          # === 2. SFTP 批处理：创建版本子目录并上传安装包与元数据 ===
+          # frs.sourceforge.net 为受限 Shell 账户，仅允许 SFTP/SCP/Rsync 文件传输，
+          # 禁止 ssh 远程命令（如 mkdir），故全部操作走 sftp 批处理（Git for Windows 自带 sftp）；
+          # 命令前加 '-' 表示忽略该命令错误（目录已存在时重跑不中断）
+          printf '%s\n' \
+            "-mkdir ${SF_PATH}/v${VERSION}" \
+            "put ${INSTALLER} ${SF_PATH}/v${VERSION}/Canbox-Setup-x86_64.exe" \
+            "put latest-win.json ${SF_PATH}/latest-win.json" \
+            | sftp -o StrictHostKeyChecking=no -o BatchMode=yes -b - \
+                "${SFTP_USER},canbox-manager@frs.sourceforge.net"
