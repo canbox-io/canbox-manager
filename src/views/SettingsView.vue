@@ -1,9 +1,10 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSettingsStore } from '@/stores/settings';
 import { ElMessageBox } from 'element-plus';
 import notification from '@/utils/notification';
+import { navItems } from '@/utils/nav-items';
 
 const { t, locale } = useI18n();
 const settingsStore = useSettingsStore();
@@ -18,6 +19,29 @@ const languages = [
     { value: 'zh-CN', label: '中文（简体）' },
     { value: 'en-US', label: 'English (US)' }
 ];
+
+// 快捷键清单（页面切换来自共享导航配置；界面缩放为 src/main.js 中已注册的快捷键）
+const shortcutGroups = computed(() => [
+    {
+        title: t('shortcuts.pageNav'),
+        items: navItems.map(item => ({
+            keys: item.shortcut,
+            description: t('shortcuts.openPage', { name: t(item.label) })
+        }))
+    },
+    {
+        title: t('shortcuts.zoom'),
+        items: [
+            { keys: 'ctrl + =', description: t('shortcuts.zoomIn') },
+            { keys: 'ctrl + -', description: t('shortcuts.zoomOut') },
+            { keys: 'ctrl + 0', description: t('shortcuts.zoomReset') },
+            {
+                keys: `ctrl + ${t('shortcuts.wheel')}`,
+                description: t('shortcuts.zoomWheel')
+            }
+        ]
+    }
+]);
 
 onMounted(async () => {
     await settingsStore.fetchSettings();
@@ -276,6 +300,26 @@ async function handleResetDataPath() {
                 </div>
             </el-card>
 
+            <!-- 快捷键 -->
+            <el-card class="settings-section" shadow="never">
+                <template #header>
+                    <span class="section-title">{{ $t('settings.shortcuts') }}</span>
+                </template>
+                <div v-for="group in shortcutGroups" :key="group.title" class="shortcut-group">
+                    <div class="shortcut-group-title">{{ group.title }}</div>
+                    <div
+                        v-for="item in group.items"
+                        :key="item.keys + item.description"
+                        class="shortcut-item"
+                    >
+                        <span class="shortcut-desc">{{ item.description }}</span>
+                        <el-tag class="shortcut-keys" size="small" type="info" disable-transitions>
+                            {{ item.keys }}
+                        </el-tag>
+                    </div>
+                </div>
+            </el-card>
+
             <!-- 重置 -->
             <div class="settings-footer">
                 <el-button type="danger" plain @click="handleReset">
@@ -390,5 +434,37 @@ async function handleResetDataPath() {
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+}
+
+.shortcut-group {
+    padding: 6px 0;
+}
+
+.shortcut-group + .shortcut-group {
+    margin-top: 8px;
+}
+
+.shortcut-group-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-regular);
+    margin-bottom: 6px;
+}
+
+.shortcut-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+}
+
+.shortcut-desc {
+    font-size: 14px;
+    color: var(--el-text-color-primary);
+}
+
+.shortcut-keys {
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    letter-spacing: 0.3px;
 }
 </style>

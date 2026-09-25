@@ -148,6 +148,7 @@
     "settings": {
         "title": "设置",
         "general": "通用",
+        "shortcuts": "快捷键",
         "language": "语言",
         "languageHint": "界面显示语言",
         "autoStart": "开机自启",
@@ -172,6 +173,16 @@
         "logRetention": "日志保留天数",
         "resetSettings": "恢复默认设置",
         "resetConfirm": "确定要恢复默认设置吗？"
+    },
+    "shortcuts": {
+        "pageNav": "页面切换",
+        "zoom": "界面缩放",
+        "openPage": "打开「{name}」页面",
+        "zoomIn": "放大界面",
+        "zoomOut": "缩小界面",
+        "zoomReset": "恢复默认缩放",
+        "zoomWheel": "缩放界面",
+        "wheel": "鼠标滚轮"
     },
     "about": {
         "title": "关于",

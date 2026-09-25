@@ -152,6 +152,7 @@
     "settings": {
         "title": "Settings",
         "general": "General",
+        "shortcuts": "Shortcuts",
         "language": "Language",
         "languageHint": "Interface display language",
         "autoStart": "Launch at startup",
@@ -176,6 +177,16 @@
         "logRetention": "Log Retention (days)",
         "resetSettings": "Reset to Defaults",
         "resetConfirm": "Are you sure you want to reset all settings to defaults?"
+    },
+    "shortcuts": {
+        "pageNav": "Page Navigation",
+        "zoom": "Interface Zoom",
+        "openPage": "Open the {name} page",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "zoomReset": "Reset zoom to default",
+        "zoomWheel": "Zoom in or out",
+        "wheel": "mouse wheel"
     },
     "about": {
         "title": "About",

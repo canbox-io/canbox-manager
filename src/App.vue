@@ -1,22 +1,15 @@
 <script setup>
 import { useRouter, useRoute } from 'vue-router';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 import { useElectronStore } from '@/stores/electron';
+import { navItems } from '@/utils/nav-items';
 
 const router = useRouter();
 const route = useRoute();
 const settingsStore = useSettingsStore();
 const electronStore = useElectronStore();
 const sidebarExpanded = ref(false);
-
-const navItems = [
-    { path: '/', emoji: '⊞', label: 'nav.apps' },
-    { path: '/repos', emoji: '📁', label: 'nav.repos' },
-    { path: '/settings', emoji: '⚙', label: 'nav.settings' },
-    { path: '/electron-versions', emoji: '⚡', label: 'nav.electron' },
-    { path: '/about', emoji: 'ℹ', label: 'nav.about' }
-];
 
 const activeNav = computed(() => route.path);
 const sidebarWidth = computed(() => sidebarExpanded.value ? '172px' : '64px');
@@ -29,10 +22,27 @@ function navigate(item) {
     router.push(item.path);
 }
 
+// alt+1 ~ alt+5 快速切换页面（主键盘与数字小键盘均支持）
+function handleShortcutKey(event) {
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const matched = event.code.match(/^(?:Digit|Numpad)([1-5])$/);
+    if (!matched) return;
+    const item = navItems[Number(matched[1]) - 1];
+    if (item) {
+        event.preventDefault();
+        if (route.path !== item.path) router.push(item.path);
+    }
+}
+
 onMounted(() => {
     // 全局订阅下载进度事件（应用生命周期内只订阅一次）
     electronStore.subscribe();
     window.api?.manager?.appReady?.();
+    window.addEventListener('keydown', handleShortcutKey);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('keydown', handleShortcutKey);
 });
 </script>
 
@@ -48,7 +58,7 @@ onMounted(() => {
                     :key="item.path"
                     class="nav-item"
                     :class="{ active: activeNav === item.path }"
-                    :title="$t(item.label)"
+                    :title="`${$t(item.label)} (${item.shortcut})`"
                     @click="navigate(item)"
                 >
                     <span class="sidebar-emoji">{{ item.emoji }}</span>
