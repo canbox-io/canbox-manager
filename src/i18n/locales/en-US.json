@@ -189,7 +189,6 @@
         "author": "Author",
         "homepage": "Homepage",
         "checkUpdate": "Check for Updates",
-        "upToDate": "Up to date",
         "update": {
             "title": "Update",
             "currentVersion": "Current Version",
@@ -197,6 +196,7 @@
             "newVersionAvailable": "New version available, update recommended",
             "checkUpdate": "Check for Updates",
             "updateNow": "Update Now",
+            "upToDate": "Up to date",
             "downloading": "Downloading ",
             "downloadFailed": "Download failed",
             "checkFailed": "Update check failed",
