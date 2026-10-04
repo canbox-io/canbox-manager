@@ -2457,16 +2457,33 @@ app.whenReady().then(() => {
         }).catch(() => {});
     }, 30000);
 
-    // 启动 30s 后后台预热内置 Catalog 源（不阻塞启动、失败静默）
-    setTimeout(() => {
+    // 启动 30s 后后台预热内置 Catalog 源，并按 nextRefresh 定期刷新（不阻塞启动、失败静默）
+    const CATALOG_REFRESH_CHECK_INTERVAL = 30 * 60 * 1000;
+
+    function refreshDueCatalogs() {
         try {
             for (const source of catalogManager.listSources()) {
-                catalogManager.fetchCatalog(source.id, { force: false }).catch(() => {});
+                const meta = catalogManager.readCacheMeta(source.id);
+                // 无缓存元信息，或已到 nextRefresh 时间点，才触发刷新；
+                // 拉取失败时不会写入新 meta，nextRefresh 仍为过去时间，下一轮会自动重试
+                const due = !meta || !meta.nextRefresh || Date.now() >= Date.parse(meta.nextRefresh);
+                if (!due) continue;
+                catalogManager.fetchCatalog(source.id, { force: false })
+                    .then(result => {
+                        if (result && result.success && !result.fromCache &&
+                            mainWindow && !mainWindow.isDestroyed()) {
+                            mainWindow.webContents.send('manager.catalog.updated', { sourceId: source.id });
+                        }
+                    })
+                    .catch(() => {});
             }
         } catch (e) {
             // 静默忽略
         }
-    }, 30000);
+    }
+
+    setTimeout(refreshDueCatalogs, 30000);
+    setInterval(refreshDueCatalogs, CATALOG_REFRESH_CHECK_INTERVAL);
 });
 
 app.on('window-all-closed', () => {

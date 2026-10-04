@@ -15,6 +15,8 @@ export const useCatalogStore = defineStore('catalog', () => {
     const fromCache = ref(false);
     const partialFailed = ref(false);
     const tooManyShards = ref(false);
+    const stale = ref(false);
+    const fetchError = ref(null);
     const loading = ref(false);
     const error = ref(null);
     const currentSourceId = ref(localStorage.getItem(LS_CURRENT_SOURCE) || 'default');
@@ -112,6 +114,8 @@ export const useCatalogStore = defineStore('catalog', () => {
             fromCache.value = !!result.fromCache;
             partialFailed.value = !!result.partialFailed;
             tooManyShards.value = !!result.tooManyShards;
+            stale.value = !!result.stale;
+            fetchError.value = result.stale ? (result.error || null) : null;
         }
     }
 
@@ -144,6 +148,10 @@ export const useCatalogStore = defineStore('catalog', () => {
             const cached = await getCache(sourceId);
             if (cached && cached.cached && cached.apps) {
                 applyResult(sourceId, cached);
+                if (sourceId === currentSourceId.value) {
+                    stale.value = true;
+                    fetchError.value = e.message;
+                }
             }
             return { success: false, error: e.message };
         } finally {
@@ -163,6 +171,8 @@ export const useCatalogStore = defineStore('catalog', () => {
             fromCache.value = false;
             partialFailed.value = false;
             tooManyShards.value = false;
+            stale.value = false;
+            fetchError.value = null;
             error.value = null;
             return;
         }
@@ -253,7 +263,7 @@ export const useCatalogStore = defineStore('catalog', () => {
 
     return {
         sources, currentSourceId, currentSource, currentApps, currentMeta,
-        isBuiltinCurrent, loading, error, fromCache, partialFailed, tooManyShards,
+        isBuiltinCurrent, loading, error, fromCache, partialFailed, tooManyShards, stale, fetchError,
         searchQuery, categoryFilter, sortBy, allCategories, filteredApps,
         fetchSources, loadSource, primeAllCaches, setActiveSource, refreshSource, isManualRefreshLocked,
         setSearch, setCategory, setSortBy, isInstalled, fetchReadme, fetchRepoMarkdown, matchLang,

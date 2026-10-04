@@ -88,6 +88,11 @@ const api = {
         catalogGetCache: (sourceId) => ipcRenderer.invoke('manager.catalog.getCache', sourceId),
         catalogGetReadme: (repoUrl) => ipcRenderer.invoke('manager.catalog.getReadme', repoUrl),
         catalogGetRepoMarkdown: (repoUrl, filePath, branch) => ipcRenderer.invoke('manager.catalog.getRepoMarkdown', repoUrl, filePath, branch),
+        onCatalogUpdated: (callback) => {
+            const handler = (_e, data) => callback(data);
+            ipcRenderer.on('manager.catalog.updated', handler);
+            return () => ipcRenderer.removeListener('manager.catalog.updated', handler);
+        },
         // 统一下载入口（默认组 / 内置仓库源 / 自定义仓库源 共用），以 repoUrl 为主键
         catalogInstall: (repoUrl, options) => ipcRenderer.invoke('manager.catalog.install', repoUrl, options),
         catalogGetInstallState: (repoUrl, latestVersion) => ipcRenderer.invoke('manager.catalog.getInstallState', repoUrl, latestVersion),

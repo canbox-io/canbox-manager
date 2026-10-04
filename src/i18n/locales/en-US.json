@@ -128,6 +128,7 @@
         "installFromCatalog": "Download",
         "viewReadme": "View README",
         "usingCache": "Showing cached data",
+        "staleData": "Failed to fetch the source, showing cached data",
         "partialFailed": "Some shards failed to load, using cache as fallback",
         "empty": "No apps in this source",
         "fetchFailed": "Failed to fetch catalog",

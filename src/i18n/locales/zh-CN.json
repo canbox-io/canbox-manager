@@ -124,6 +124,7 @@
         "installFromCatalog": "下载",
         "viewReadme": "查看 README",
         "usingCache": "当前显示的是本地缓存数据",
+        "staleData": "数据源拉取失败，当前显示的是本地缓存数据",
         "partialFailed": "部分分片拉取失败，已使用缓存补全",
         "empty": "该数据源暂无应用",
         "fetchFailed": "目录拉取失败",

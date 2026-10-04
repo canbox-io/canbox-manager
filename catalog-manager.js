@@ -16,12 +16,32 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 // 平台解析复用 repo-probe（平台差异集中在 parseRepo / getRawUrl / getWebBaseUrl）
-const { parseRepo, getRawUrl, getRepoContext } = require('./repo-probe');
+// GITHUB_MIRRORS 用于 raw.githubusercontent.com 被墙时的镜像兜底
+const { parseRepo, getRawUrl, getRepoContext, GITHUB_MIRRORS } = require('./repo-probe');
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/0.1.0';
 const REQUEST_TIMEOUT = 20000;
 const CATALOG_SCHEMA_VERSION = 2;
 const MAX_SHARDS_WARN = 20;
+
+// 通过 canbox-core 注入的 logger（log4js），写入 {usersPath}/logs/canbox.log
+// 若 logger 未初始化（如开发环境直接 require），降级为 console。
+// 注意：不在模块加载时获取，而是每次使用时动态获取——logger.init() 在 app.whenReady() 后异步执行
+function _getLogger() {
+    try {
+        const corePath = global.__CANBOX_CORE_PATH__;
+        if (!corePath) return console;
+        const loggerModule = require(path.join(corePath, 'lib', 'logger'));
+        return loggerModule.get() || console;
+    } catch (_) {
+        return console;
+    }
+}
+const logger = {
+    info: (...args) => _getLogger().info(...args),
+    warn: (...args) => _getLogger().warn(...args),
+    error: (...args) => _getLogger().error(...args)
+};
 
 const BUILTIN_SOURCES = [
     {
@@ -128,31 +148,75 @@ function writeCacheMeta(sourceId, meta) {
 }
 
 /**
- * 发起带 ETag/Last-Modified 的 GET JSON 请求
- * @returns {{status:number, data?:any, etag?:string, lastModified?:string}}
+ * 构建某 URL 的候选线路：直连优先；若为 raw.githubusercontent.com 则追加镜像兜底。
+ * raw.githubusercontent.com 在国内常被墙，github.com 又会被 302 回该域名，故只能用第三方镜像。
+ * @param {string} url
+ * @returns {Array<{name:string,url:string}>}
+ */
+function buildUrlCandidates(url) {
+    const list = [{ name: 'direct', url }];
+    try {
+        const u = new URL(url);
+        if (u.hostname === 'raw.githubusercontent.com') {
+            for (const m of GITHUB_MIRRORS) {
+                list.push({ name: m.name, url: `${m.url}/${url}` });
+            }
+        }
+    } catch (_) { /* URL 非法，仅直连 */ }
+    return list;
+}
+
+// 最近一次成功的线路名，用于后续请求优先复用，避免每次都先撞直连超时
+let lastGoodRoute = null;
+
+function orderCandidates(candidates, preferred) {
+    if (!preferred) return candidates;
+    const idx = candidates.findIndex(c => c.name === preferred);
+    if (idx <= 0) return candidates;
+    return [candidates[idx], ...candidates.slice(0, idx), ...candidates.slice(idx + 1)];
+}
+
+/**
+ * 发起带 ETag/Last-Modified 的 GET JSON 请求，按候选线路依次重试
+ * @returns {{status:number, data?:any, etag?:string, lastModified?:string, route:string}}
  */
 async function httpGetJson(url, headers = {}) {
-    const res = await axios.get(url, {
-        timeout: REQUEST_TIMEOUT,
-        headers: { 'User-Agent': UA, ...headers },
-        validateStatus: s => s >= 200 && s < 400,
-        transformResponse: [d => d]
-    });
-    if (res.status === 304) {
-        return { status: 304, etag: res.headers.etag, lastModified: res.headers['last-modified'] };
+    const candidates = orderCandidates(buildUrlCandidates(url), lastGoodRoute);
+    let lastErr = null;
+    for (const cand of candidates) {
+        try {
+            const res = await axios.get(cand.url, {
+                timeout: REQUEST_TIMEOUT,
+                headers: { 'User-Agent': UA, ...headers },
+                validateStatus: s => s >= 200 && s < 400,
+                transformResponse: [d => d]
+            });
+            lastGoodRoute = cand.name;
+            if (cand.name !== 'direct') {
+                logger.info('[catalog] httpGetJson: 经镜像 %s 访问成功 url=%s', cand.name, url);
+            }
+            if (res.status === 304) {
+                return { status: 304, etag: res.headers.etag, lastModified: res.headers['last-modified'], route: cand.name };
+            }
+            let data = null;
+            try {
+                data = JSON.parse(res.data);
+            } catch (e) {
+                throw new Error('返回内容不是合法的 JSON');
+            }
+            return {
+                status: 200,
+                data,
+                etag: res.headers.etag,
+                lastModified: res.headers['last-modified'],
+                route: cand.name
+            };
+        } catch (e) {
+            lastErr = e;
+            logger.info('[catalog] httpGetJson: 线路 %s 失败 url=%s error=%s', cand.name, url, e.code || e.message || e);
+        }
     }
-    let data = null;
-    try {
-        data = JSON.parse(res.data);
-    } catch (e) {
-        throw new Error('返回内容不是合法的 JSON');
-    }
-    return {
-        status: 200,
-        data,
-        etag: res.headers.etag,
-        lastModified: res.headers['last-modified']
-    };
+    throw lastErr || new Error('所有线路均失败');
 }
 
 /**
@@ -183,6 +247,8 @@ async function fetchCatalog(sourceId, options = {}) {
     const force = !!options.force;
     const source = getSource(sourceId);
     if (!source) throw new Error('数据源不存在');
+
+    logger.info('[catalog] fetchCatalog: start sourceId=%s force=%s url=%s', sourceId, force, source.url);
 
     const baseUrl = source.url;
     const cacheDir = getCacheDir(sourceId);
@@ -226,7 +292,13 @@ async function fetchCatalog(sourceId, options = {}) {
     } catch (e) {
         // 索引拉取失败：降级到本地缓存
         const cached = readCachedCatalog(sourceId);
-        if (!cached.cached) throw new Error(`拉取失败且无本地缓存：${e.message}`);
+        const errText = e.code || e.message || String(e);
+        if (!cached.cached) {
+            logger.error('[catalog] fetchCatalog: 索引拉取失败且无本地缓存 sourceId=%s error=%s', sourceId, errText);
+            throw new Error(`拉取失败且无本地缓存：${errText}`);
+        }
+        logger.error('[catalog] fetchCatalog: 索引拉取失败，降级本地缓存 sourceId=%s lastRefresh=%s error=%s',
+            sourceId, (cached.meta && cached.meta.lastRefresh) || 'unknown', errText);
         return {
             success: true,
             fromCache: true,
@@ -235,7 +307,7 @@ async function fetchCatalog(sourceId, options = {}) {
             apps: cached.apps,
             meta: cached.meta,
             source,
-            error: e.message
+            error: errText
         };
     }
 
@@ -302,6 +374,8 @@ async function fetchCatalog(sourceId, options = {}) {
         } catch (e) {
             // 分片失败：尝试用本地缓存，仅标记部分失败
             const cached = readJsonSafe(shardFile);
+            logger.error('[catalog] fetchCatalog: 分片 %s 拉取失败 sourceId=%s error=%s hasCache=%s',
+                shard.file, sourceId, e.message, !!cached);
             if (cached) {
                 return {
                     id: shard.id,
@@ -349,6 +423,9 @@ async function fetchCatalog(sourceId, options = {}) {
     };
     writeCacheMeta(sourceId, meta);
 
+    logger.info('[catalog] fetchCatalog: done sourceId=%s apps=%d shards=%d partialFailed=%s catalogUnchanged=%s route=%s',
+        sourceId, apps.length, shardMetas.length, partialFailed, usedCachedCatalog, lastGoodRoute);
+
     return {
         success: true,
         fromCache: false,
@@ -367,14 +444,24 @@ async function fetchCatalog(sourceId, options = {}) {
  */
 async function fetchRawText(repoUrl, branch, filePath) {
     const url = getRawUrl(repoUrl, branch, filePath);
-    const res = await axios.get(url, {
-        timeout: REQUEST_TIMEOUT,
-        headers: { 'User-Agent': UA },
-        responseType: 'text',
-        transformResponse: [d => d],
-        validateStatus: s => s >= 200 && s < 400
-    });
-    return res.status === 200 ? res.data : null;
+    const candidates = orderCandidates(buildUrlCandidates(url), lastGoodRoute);
+    let lastErr = null;
+    for (const cand of candidates) {
+        try {
+            const res = await axios.get(cand.url, {
+                timeout: REQUEST_TIMEOUT,
+                headers: { 'User-Agent': UA },
+                responseType: 'text',
+                transformResponse: [d => d],
+                validateStatus: s => s >= 200 && s < 400
+            });
+            lastGoodRoute = cand.name;
+            return res.status === 200 ? res.data : null;
+        } catch (e) {
+            lastErr = e;
+        }
+    }
+    throw lastErr || new Error('请求失败');
 }
 
 /**

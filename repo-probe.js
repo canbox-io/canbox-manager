@@ -16,9 +16,9 @@ const TIMEOUT = 15000;
 
 // GitHub 代理列表（仅用于加速 github.com 下载，每次下载前并发测速选最优）
 const GITHUB_MIRRORS = [
-    { name: 'ghproxy', url: 'https://ghproxy.com' },
     { name: 'ghfast', url: 'https://ghfast.top' },
-    { name: 'ghgo', url: 'https://ghgo.xyz' }
+    { name: 'ghproxy-net', url: 'https://ghproxy.net' },
+    { name: 'gh-proxy', url: 'https://gh-proxy.com' }
 ];
 
 /**
@@ -543,5 +543,6 @@ module.exports = {
     getRepoContext,
     getReleaseDownloadUrl,
     probeRepo,
-    downloadFile
+    downloadFile,
+    GITHUB_MIRRORS
 };

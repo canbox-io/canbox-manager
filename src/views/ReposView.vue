@@ -186,6 +186,7 @@ function repoLogoSrc(repo) {
 }
 
 let removeProgressListener = null;
+let removeCatalogUpdatedListener = null;
 
 onMounted(async () => {
     reposStore.fetchRepos();
@@ -193,6 +194,12 @@ onMounted(async () => {
         // 三组统一以 repoUrl 为进度 key
         if (data && data.repoUrl) {
             reposStore.installProgress[data.repoUrl] = data.progress;
+        }
+    });
+    // 主进程按 nextRefresh 后台刷新完成后通知，重新加载对应源
+    removeCatalogUpdatedListener = window.api.manager.onCatalogUpdated((data) => {
+        if (data && data.sourceId) {
+            catalogStore.loadSource(data.sourceId, { silent: true });
         }
     });
     await catalogStore.fetchSources();
@@ -225,6 +232,7 @@ watch(() => catalogStore.filteredApps, (apps) => {
 
 onUnmounted(() => {
     if (removeProgressListener) removeProgressListener();
+    if (removeCatalogUpdatedListener) removeCatalogUpdatedListener();
     window.removeEventListener('keydown', onGlobalKey);
 });
 
@@ -877,8 +885,9 @@ const searchTotal = computed(() =>
                     </div>
                 </div>
 
-                <div v-if="catalogStore.currentMeta || catalogStore.fromCache || catalogStore.partialFailed" class="catalog-footer">
-                    <span v-if="catalogStore.fromCache" class="cache-hint-text">{{ $t('catalog.usingCache') }}</span>
+                <div v-if="catalogStore.currentMeta || catalogStore.fromCache || catalogStore.partialFailed || catalogStore.stale" class="catalog-footer">
+                    <span v-if="catalogStore.stale" class="cache-hint-text" :title="catalogStore.fetchError || ''">{{ $t('catalog.staleData') }}</span>
+                    <span v-else-if="catalogStore.fromCache" class="cache-hint-text">{{ $t('catalog.usingCache') }}</span>
                     <span v-if="catalogStore.partialFailed" class="cache-hint-text">{{ $t('catalog.partialFailed') }}</span>
                     <span v-if="catalogStore.currentMeta">{{ $t('catalog.totalApps', { count: catalogStore.currentMeta.totalApps || catalogStore.currentApps.length }) }}</span>
                     <span v-if="catalogStore.currentMeta && catalogStore.currentMeta.lastRefresh">
