@@ -4,6 +4,30 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.8] - 2026-10-04
+
+### feat | 新功能 / Features
+
+数据源拉取失败时在界面提示当前显示的是本地缓存数据
+按 nextRefresh 定时后台刷新数据源，刷新完成后自动更新界面
+
+Show a hint in the UI when the data source fails to fetch and cached data is displayed
+Refresh catalog sources periodically based on nextRefresh and update the UI automatically
+
+### fix | 问题修复 / Bug Fixes
+
+修复数据源拉取无法访问 raw.githubusercontent.com 时长期沿用旧缓存、数据滞后的问题，新增镜像线路兜底
+更新失效的 GitHub 镜像列表为可用镜像（ghfast.top / ghproxy.net / gh-proxy.com）
+
+Fix stale catalog data when raw.githubusercontent.com is unreachable by adding mirror fallback routes
+Replace dead GitHub mirrors with working ones (ghfast.top / ghproxy.net / gh-proxy.com)
+
+### chore | 维护 / Maintenance
+
+新增数据源拉取过程日志，便于排查失败原因
+
+Add logging for catalog fetch failures to ease troubleshooting
+
 ## [0.2.7] - 2026-09-25
 
 ### feat | 新功能 / Features
