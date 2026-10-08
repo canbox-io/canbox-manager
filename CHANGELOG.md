@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.2.9] - 2026-10-08
+
+### fix | 问题修复 / Bug Fixes
+
+修复“我的应用”页点击更新按钮时调用已移除的旧接口、导致无法下载与更新失败的问题，并补充失败提示
+
+Fix the "My Apps" update button calling a removed legacy API, which prevented download and caused updates to fail, and add failure prompts
+
+### refactor | 重构 / Refactoring
+
+统一下载、安装、更新与导入流程的日志输出，由 console 改为核心 logger，并补充各环节关键日志，便于排查问题
+
+Unify logging across the download, install, update and import flows by switching from console to the core logger and adding key step logs for troubleshooting
+
 ## [0.2.8] - 2026-10-04
 
 ### feat | 新功能 / Features
