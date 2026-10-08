@@ -43,14 +43,20 @@ const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/' + pkg.version;
 // 5s 超时：SourceForge / GitHub API / 镜像探测共用，慢源由并发竞速自然淘汰
 const TIMEOUT = 5000;
 
+// 安装包下载的 socket 空闲超时：镜像线路走默认值，直连 GitHub 用短超时
+const DOWNLOAD_TIMEOUT = 60000;
+// 直连 github.com 大文件在国内常被完全阻断（socket 空闲、收不到任何字节），
+// 用更短的空闲超时快速失败，尽早切换到镜像或 SourceForge 兜底
+const DIRECT_TIMEOUT = 15000;
+
 // SourceForge 项目下载根（latest-{platform}.json 与版本子目录均位于其下）
 const SOURCEFORGE_BASE_URL = 'https://downloads.sourceforge.net/project/canbox-manager';
 
-// GitHub 代理列表（与 repo-probe.js 一致，用于加速 API 和下载）
+// GitHub 代理列表（与 repo-probe.js 保持一致，用于加速 API 和下载）
 const GITHUB_MIRRORS = [
-    { name: 'ghproxy', url: 'https://ghproxy.com' },
     { name: 'ghfast', url: 'https://ghfast.top' },
-    { name: 'ghgo', url: 'https://ghgo.xyz' }
+    { name: 'ghproxy-net', url: 'https://ghproxy.net' },
+    { name: 'gh-proxy', url: 'https://gh-proxy.com' }
 ];
 
 /**
@@ -129,6 +135,47 @@ function getPlatformAssetName() {
         return 'Canbox-Setup-x86_64.exe';
     }
     return 'Canbox-linux-x86_64.sh';
+}
+
+/**
+ * 从 GitHub release 下载地址中提取 tag（形如 v0.2.9）
+ */
+function extractGithubTag(url) {
+    const m = /\/releases\/download\/([^/]+)\//.exec(url);
+    return m ? m[1] : null;
+}
+
+/**
+ * 从 SourceForge 下载地址中提取 tag（形如 v0.2.9）
+ */
+function extractSourceforgeTag(url) {
+    const m = /\/project\/[^/]+\/([^/]+)\//.exec(url);
+    return m ? m[1] : null;
+}
+
+/**
+ * 构造跨源兜底下载地址：GitHub 与 SourceForge 互为备份。
+ *
+ * 检查更新的竞速只决定用谁的元数据，不代表该源的下载可达——
+ * 例如 GitHub API 很快返回，但 github.com 大文件下载在国内可能完全不通。
+ * 故下载阶段需要跨源兜底：GitHub 线路全挂时改走 SourceForge，反之亦然。
+ *
+ * @param {string} downloadUrl 主源下载地址
+ * @returns {{name:string,url:string}|null} 兜底候选；无法构造时返回 null
+ */
+function buildCrossSourceCandidate(downloadUrl) {
+    const assetName = getPlatformAssetName();
+    if (/^https?:\/\/[^/]*github\.com\//i.test(downloadUrl)) {
+        const tag = extractGithubTag(downloadUrl);
+        if (!tag) return null;
+        return { name: 'sourceforge', url: `${SOURCEFORGE_BASE_URL}/${tag}/${assetName}` };
+    }
+    if (/sourceforge\.net/i.test(downloadUrl)) {
+        const tag = extractSourceforgeTag(downloadUrl);
+        if (!tag) return null;
+        return { name: 'github-direct', url: `https://github.com/${UPDATE_REPO}/releases/download/${tag}/${assetName}` };
+    }
+    return null;
 }
 
 /**
@@ -251,14 +298,19 @@ async function checkUpdate() {
 
 /**
  * 流式下载（带进度回调）
+ *
+ * @param {string} url 下载地址
+ * @param {string} destPath 本地目标路径
+ * @param {(progress:number)=>void} [onProgress] 0~100
+ * @param {number} [timeout] socket 空闲超时（ms），默认 DOWNLOAD_TIMEOUT
  */
-async function streamDownload(url, destPath, onProgress) {
-    logger.info('[updater] streamDownload: url=%s dest=%s', url, destPath);
+async function streamDownload(url, destPath, onProgress, timeout = DOWNLOAD_TIMEOUT) {
+    logger.info('[updater] streamDownload: url=%s dest=%s timeout=%d', url, destPath, timeout);
     const resp = await axios({
         method: 'get',
         url,
         responseType: 'stream',
-        timeout: 60000,
+        timeout,
         headers: { 'User-Agent': UA },
         maxRedirects: 5
     });
@@ -302,7 +354,8 @@ async function streamDownload(url, destPath, onProgress) {
 /**
  * 下载安装包
  *
- * 通过 GitHub 代理测速选最优线路下载，全部失败则降级直连。
+ * 候选线路顺序：GitHub 镜像测速结果 → 同源直连 → 跨源兜底（GitHub ↔ SourceForge）。
+ * 主源全部失败后自动改走另一个源，避免"API 通、下载不通"时整个更新失败。
  * 安装包保存到 os.tmpdir()，使用原资产名，已存在则覆盖。
  *
  * @param {string} downloadUrl release 资产的 browser_download_url
@@ -325,7 +378,7 @@ async function downloadInstaller(downloadUrl, onProgress) {
     const isGithub = /^https?:\/\/[^/]*github\.com\//i.test(downloadUrl);
     const isSourceforge = /sourceforge\.net/i.test(downloadUrl);
 
-    // 构建候选线路：可用代理 + 直连兜底
+    // 构建候选线路：可用代理 + 同源直连 + 跨源兜底
     const candidates = [];
     if (isGithub) {
         const mirrors = await probeMirrors(downloadUrl);
@@ -337,7 +390,21 @@ async function downloadInstaller(downloadUrl, onProgress) {
     } else {
         logger.info('[updater] downloadInstaller: non-github url, skip mirror probing');
     }
-    candidates.push({ name: isSourceforge ? 'sourceforge' : 'direct', url: downloadUrl });
+    // 同源直连兜底：直连 GitHub 走短超时，避免 socket 空闲卡满下载超时
+    candidates.push({
+        name: isSourceforge ? 'sourceforge' : 'direct',
+        url: downloadUrl,
+        timeout: isGithub ? DIRECT_TIMEOUT : DOWNLOAD_TIMEOUT
+    });
+
+    // 跨源兜底：主源线路全部失败后改走另一个源（GitHub ↔ SourceForge）
+    const crossSource = buildCrossSourceCandidate(downloadUrl);
+    if (crossSource) {
+        candidates.push(crossSource);
+    } else {
+        logger.info('[updater] downloadInstaller: cross-source fallback unavailable, url=%s', downloadUrl);
+    }
+
     logger.info('[updater] downloadInstaller: %d candidate lines', candidates.length);
 
     let lastErr;
@@ -345,7 +412,7 @@ async function downloadInstaller(downloadUrl, onProgress) {
         const candidate = candidates[i];
         logger.info('[updater] downloadInstaller: trying line=%s (%d/%d)', candidate.name, i + 1, candidates.length);
         try {
-            await streamDownload(candidate.url, destPath, onProgress);
+            await streamDownload(candidate.url, destPath, onProgress, candidate.timeout);
             const stat = fs.statSync(destPath);
             logger.info('[updater] downloadInstaller: success, line=%s size=%d bytes path=%s', candidate.name, stat.size, destPath);
             return destPath;
