@@ -66,7 +66,7 @@ function getPlatforms(app) {
     return app.platforms && app.platforms.length > 0 ? app.platforms : ['windows', 'darwin', 'linux'];
 }
 
-// APP 更新信息：{ [appId]: { repoId, currentVersion, newVersion } }
+// APP 更新信息：{ [appId]: { repoUrl, currentVersion, newVersion } }
 const appUpdates = ref({});
 let offUpdatesAvailable = null;
 
@@ -320,7 +320,11 @@ async function handleUpdateApp(app) {
             }
         }
 
-        await reposStore.installRepo(update.repoId);
+        const installResult = await reposStore.installByRepoUrl(update.repoUrl, { firstDownloadFrom: 'default' });
+        if (!installResult || !installResult.success) {
+            notification.error((installResult && installResult.error) || t('common.error'));
+            return;
+        }
         notification.success(t('apps.updateSuccess'));
         // 更新完成后清除该 APP 的更新标记并刷新列表
         const next = { ...appUpdates.value };
@@ -353,13 +357,11 @@ async function installDeveloper() {
     if (reposStore.installingDeveloper) return;
     reposStore.installingDeveloper = true;
 
-    let repoId = null;
     try {
         // 1. 添加 developer 仓库（已存在则复用）
         await reposStore.fetchRepos();
         const existing = reposStore.repos.find(r => r.url === DEVELOPER_REPO_URL);
         if (existing) {
-            repoId = existing.id;
             notification.info(t('developer.repoExists'));
         } else {
             const addResult = await reposStore.addRepo(DEVELOPER_REPO_URL);
@@ -367,14 +369,13 @@ async function installDeveloper() {
                 notification.error(addResult.error || t('developer.addFailed'));
                 return;
             }
-            repoId = addResult.repo.id;
         }
 
         // 2. 跳转仓库页（让用户看到下载进度卡片）
         router.push('/repos');
 
         // 3. 触发安装（下载 + import）
-        const installResult = await reposStore.installRepo(repoId);
+        const installResult = await reposStore.installByRepoUrl(DEVELOPER_REPO_URL, { firstDownloadFrom: 'default' });
         if (installResult.success) {
             notification.success(t('developer.installSuccess'));
         } else {

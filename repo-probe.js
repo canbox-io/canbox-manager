@@ -11,6 +11,25 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+// 通过 canbox-core 注入的 logger（log4js），写入 {usersPath}/logs/canbox.log
+// 若 logger 未初始化（如开发环境直接 require），降级为 console。
+// 注意：不在模块加载时获取，而是每次使用时动态获取——logger.init() 在 app.whenReady() 后异步执行
+function _getLogger() {
+    try {
+        const corePath = global.__CANBOX_CORE_PATH__;
+        if (!corePath) return console;
+        const loggerModule = require(path.join(corePath, 'lib', 'logger'));
+        return loggerModule.get() || console;
+    } catch (_) {
+        return console;
+    }
+}
+const logger = {
+    info: (...args) => _getLogger().info(...args),
+    warn: (...args) => _getLogger().warn(...args),
+    error: (...args) => _getLogger().error(...args)
+};
+
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/0.1.0';
 const TIMEOUT = 15000;
 
@@ -58,7 +77,7 @@ function parseRepo(repoUrl) {
 async function detectDefaultBranch(repoUrl) {
     const info = parseRepo(repoUrl);
     if (!info) {
-        console.log('[repo-probe] detectDefaultBranch: parseRepo failed, url=%s', repoUrl);
+        logger.info('[repo-probe] detectDefaultBranch: parseRepo failed, url=%s', repoUrl);
         return 'master';
     }
     const probeUrl = `${info.raw}/info/refs?service=git-upload-pack`;
@@ -71,15 +90,15 @@ async function detectDefaultBranch(repoUrl) {
         });
         const match = String(resp.data).match(/refs\/heads\/(\S+)/);
         if (match) {
-            console.log('[repo-probe] detectDefaultBranch: detected=%s url=%s', match[1], repoUrl);
+            logger.info('[repo-probe] detectDefaultBranch: detected=%s url=%s', match[1], repoUrl);
             return match[1];
         }
-        console.log('[repo-probe] detectDefaultBranch: no branch match in info/refs, url=%s', probeUrl);
+        logger.info('[repo-probe] detectDefaultBranch: no branch match in info/refs, url=%s', probeUrl);
     } catch (e) {
-        console.log('[repo-probe] detectDefaultBranch: info/refs failed: %s url=%s', e.message, probeUrl);
+        logger.info('[repo-probe] detectDefaultBranch: info/refs failed: %s url=%s', e.message, probeUrl);
     }
     const fallback = info.platform === 'github' ? 'main' : 'master';
-    console.log('[repo-probe] detectDefaultBranch: fallback=%s url=%s', fallback, repoUrl);
+    logger.info('[repo-probe] detectDefaultBranch: fallback=%s url=%s', fallback, repoUrl);
     return fallback;
 }
 
@@ -190,11 +209,11 @@ async function getReleaseDownloadUrl(repoUrl, appIdentifier, name, version) {
     if (apiUrls.length === 0) {
         // 非 github/gitee/gitlab 平台，无 API，直接拼接 GitHub 风格 URL（用第一个候选前缀）
         const fallback = `${normalizeRepoUrl(repoUrl)}/releases/download/${tagCandidates[0]}/${prefixCandidates[0]}-${version}.zip`;
-        console.log('[repo-probe] getReleaseDownloadUrl: no API url, fallback=%s', fallback);
+        logger.info('[repo-probe] getReleaseDownloadUrl: no API url, fallback=%s', fallback);
         return fallback;
     }
 
-    console.log('[repo-probe] getReleaseDownloadUrl: prefixes=%j, version=%s, apiUrls=%j', prefixCandidates, version, apiUrls);
+    logger.info('[repo-probe] getReleaseDownloadUrl: prefixes=%j, version=%s, apiUrls=%j', prefixCandidates, version, apiUrls);
 
     for (const apiUrl of apiUrls) {
         let data;
@@ -205,23 +224,23 @@ async function getReleaseDownloadUrl(repoUrl, appIdentifier, name, version) {
             });
             data = resp.data;
         } catch (e) {
-            console.log('[repo-probe] getReleaseDownloadUrl: api error: %s url=%s', e.message, apiUrl);
+            logger.info('[repo-probe] getReleaseDownloadUrl: api error: %s url=%s', e.message, apiUrl);
             continue;
         }
 
         // 容错：部分平台（如 gitee）tag 不存在时 API 返回字面量 null，axios 解析后为 JS null
         if (!data || typeof data !== 'object') {
-            console.log('[repo-probe] getReleaseDownloadUrl: no release data url=%s', apiUrl);
+            logger.info('[repo-probe] getReleaseDownloadUrl: no release data url=%s', apiUrl);
             continue;
         }
 
         const assets = data.assets || [];
         const found = assets.find(a => matchAsset(a.name));
         if (found) {
-            console.log('[repo-probe] getReleaseDownloadUrl: found asset=%s url=%s', found.browser_download_url, apiUrl);
+            logger.info('[repo-probe] getReleaseDownloadUrl: found asset=%s url=%s', found.browser_download_url, apiUrl);
             return found.browser_download_url;
         }
-        console.log('[repo-probe] getReleaseDownloadUrl: asset not found, prefixes=%j, available=%j url=%s', prefixCandidates, assets.map(a => a.name), apiUrl);
+        logger.info('[repo-probe] getReleaseDownloadUrl: asset not found, prefixes=%j, available=%j url=%s', prefixCandidates, assets.map(a => a.name), apiUrl);
     }
 
     return null;
@@ -246,12 +265,12 @@ async function fetchText(url) {
             transformResponse: [(data) => data]
         });
         if (resp.status !== 200) {
-            console.log('[repo-probe] fetchText non-200: status=%s url=%s', resp.status, url);
+            logger.info('[repo-probe] fetchText non-200: status=%s url=%s', resp.status, url);
             return { text: null, statusCode: resp.status, networkError: null };
         }
         const text = resp.data;
         if (typeof text !== 'string') {
-            console.log('[repo-probe] fetchText unexpected data type=%s url=%s', typeof text, url);
+            logger.info('[repo-probe] fetchText unexpected data type=%s url=%s', typeof text, url);
             return { text: null, statusCode: resp.status, networkError: 'invalid_data_type' };
         }
         return { text, statusCode: 200, networkError: null };
@@ -264,7 +283,7 @@ async function fetchText(url) {
         } else if (e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET') {
             networkError = 'connection';
         }
-        console.log('[repo-probe] fetchText error: %s (code=%s, networkError=%s) url=%s', e.message, e.code, networkError, url);
+        logger.info('[repo-probe] fetchText error: %s (code=%s, networkError=%s) url=%s', e.message, e.code, networkError, url);
         return { text: null, statusCode: null, networkError };
     }
 }
@@ -280,12 +299,12 @@ async function fetchBuffer(url) {
             headers: { 'User-Agent': UA }
         });
         if (resp.status !== 200) {
-            console.log('[repo-probe] fetchBuffer non-200: status=%s url=%s', resp.status, url);
+            logger.info('[repo-probe] fetchBuffer non-200: status=%s url=%s', resp.status, url);
             return null;
         }
         return Buffer.from(resp.data);
     } catch (e) {
-        console.log('[repo-probe] fetchBuffer error: %s url=%s', e.message, url);
+        logger.info('[repo-probe] fetchBuffer error: %s url=%s', e.message, url);
         return null;
     }
 }
@@ -305,12 +324,12 @@ async function fetchBuffer(url) {
  */
 async function probeRepo(repoUrl, options = {}) {
     const withAssets = !!options.withAssets;
-    console.log('[repo-probe] probeRepo start: url=%s withAssets=%s', repoUrl, withAssets);
+    logger.info('[repo-probe] probeRepo start: url=%s withAssets=%s', repoUrl, withAssets);
     const branch = await detectDefaultBranch(repoUrl);
-    console.log('[repo-probe] probeRepo: branch=%s', branch);
+    logger.info('[repo-probe] probeRepo: branch=%s', branch);
 
     const pkgUrl = getRawUrl(repoUrl, branch, 'package.json');
-    console.log('[repo-probe] probeRepo: fetching package.json: %s', pkgUrl);
+    logger.info('[repo-probe] probeRepo: fetching package.json: %s', pkgUrl);
     const pkgResult = await fetchText(pkgUrl);
     if (!pkgResult.text) {
         if (pkgResult.networkError === 'timeout') {
@@ -328,20 +347,20 @@ async function probeRepo(repoUrl, options = {}) {
         throw new Error(`无法访问仓库文件（HTTP ${pkgResult.statusCode}），请确认仓库地址正确且为公开仓库`);
     }
     const pkgText = pkgResult.text;
-    console.log('[repo-probe] probeRepo: package.json length=%d', pkgText.length);
+    logger.info('[repo-probe] probeRepo: package.json length=%d', pkgText.length);
     let pkg;
     try {
         pkg = JSON.parse(pkgText);
     } catch (e) {
         // 记录前 200 字符便于排查（可能是 HTML 错误页、BOM 等）
         const preview = pkgText.slice(0, 200).replace(/\s+/g, ' ');
-        console.error('[repo-probe] probeRepo: JSON.parse failed: %s, preview=%s', e.message, preview);
+        logger.error('[repo-probe] probeRepo: JSON.parse failed: %s, preview=%s', e.message, preview);
         throw new Error(`package.json 解析失败: ${e.message}`);
     }
     if (!pkg.name) {
         throw new Error('package.json 缺少 name 字段，不是合法的 Canbox APP 仓库');
     }
-    console.log('[repo-probe] probeRepo: pkg id=%s name=%s version=%s', pkg.id, pkg.name, pkg.version);
+    logger.info('[repo-probe] probeRepo: pkg id=%s name=%s version=%s', pkg.id, pkg.name, pkg.version);
 
     // logo / readme 仅在需要展示元数据时拉取，避免 update-check 等场景无谓的网络请求
     let logoBuf = null;
@@ -353,9 +372,9 @@ async function probeRepo(repoUrl, options = {}) {
         logoBuf = await fetchBuffer(logoUrl);
         if (logoBuf) {
             logoExt = path.extname(logoFile).slice(1).toLowerCase() || 'png';
-            console.log('[repo-probe] probeRepo: logo loaded, size=%d ext=%s', logoBuf.length, logoExt);
+            logger.info('[repo-probe] probeRepo: logo loaded, size=%d ext=%s', logoBuf.length, logoExt);
         } else {
-            console.log('[repo-probe] probeRepo: logo not found: %s', logoUrl);
+            logger.info('[repo-probe] probeRepo: logo not found: %s', logoUrl);
         }
 
         const readmeUrl = getRawUrl(repoUrl, branch, 'README.md');
@@ -363,10 +382,10 @@ async function probeRepo(repoUrl, options = {}) {
         // fetchText 返回 { text, statusCode, networkError }；只取 text 字符串，
         // 避免把整个对象塞进 repos.json（旧版 bug 曾导致 readme 节点变成 object）
         readme = (readmeResult && typeof readmeResult.text === 'string') ? readmeResult.text : null;
-        console.log('[repo-probe] probeRepo: readme length=%s', readme ? readme.length : 0);
+        logger.info('[repo-probe] probeRepo: readme length=%s', readme ? readme.length : 0);
     }
 
-    console.log('[repo-probe] probeRepo done: id=%s name=%s', pkg.id, pkg.name);
+    logger.info('[repo-probe] probeRepo done: id=%s name=%s', pkg.id, pkg.name);
     return {
         id: pkg.id || pkg.name,
         name: pkg.name,
@@ -443,6 +462,7 @@ async function probeMirrors(originalUrl, timeout = 3000) {
  * 流式下载单条线路（带进度回调）
  */
 async function streamDownload(url, destPath, onProgress) {
+    logger.info('[repo-probe] streamDownload: start, url=%s', url);
     const resp = await axios({
         method: 'get',
         url,
@@ -457,6 +477,7 @@ async function streamDownload(url, destPath, onProgress) {
     }
 
     const total = parseInt(resp.headers['content-length'] || '0', 10);
+    logger.info('[repo-probe] streamDownload: connected, total=%d bytes', total);
     let received = 0;
     const writer = fs.createWriteStream(destPath);
 
@@ -468,14 +489,22 @@ async function streamDownload(url, destPath, onProgress) {
             }
         });
         resp.data.on('end', () => {
+            logger.info('[repo-probe] streamDownload: body end, received=%d/%d bytes', received, total);
+            if (total > 0 && received !== total) {
+                logger.warn('[repo-probe] streamDownload: size mismatch, received=%d expected=%d', received, total);
+            }
             writer.end();
             writer.on('finish', () => resolve(destPath));
         });
         resp.data.on('error', (err) => {
+            logger.error('[repo-probe] streamDownload: stream error: %s', err.message);
             writer.destroy();
             reject(err);
         });
-        writer.on('error', (err) => reject(err));
+        writer.on('error', (err) => {
+            logger.error('[repo-probe] streamDownload: writer error: %s', err.message);
+            reject(err);
+        });
         resp.data.pipe(writer);
     });
 }
@@ -494,43 +523,52 @@ async function streamDownload(url, destPath, onProgress) {
  * @param {(progress:number)=>void} [onProgress] 进度回调 0~100
  */
 async function downloadFile(url, destPath, onProgress) {
+    const startedAt = Date.now();
     const dir = path.dirname(destPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
     const isGithub = /^https?:\/\/[^/]*github\.com\//i.test(url);
+    logger.info('[repo-probe] downloadFile: start, url=%s dest=%s isGithub=%s', url, destPath, isGithub);
 
     // 构建候选线路：可用代理（按延迟升序）+ 直连兜底
     const candidates = [];
     if (isGithub) {
-        console.log('[repo-probe] downloadFile: github url, probing mirrors: %s', url);
+        logger.info('[repo-probe] downloadFile: github url, probing mirrors: %s', url);
         const mirrors = await probeMirrors(url);
         for (const m of mirrors) {
             candidates.push({ name: m.mirror.name, url: `${m.mirror.url}/${url}` });
-            console.log('[repo-probe] downloadFile: mirror available: %s (%dms)', m.mirror.name, m.latency);
+            logger.info('[repo-probe] downloadFile: mirror available: %s (%dms)', m.mirror.name, m.latency);
         }
         if (mirrors.length === 0) {
-            console.log('[repo-probe] downloadFile: all mirrors unavailable, fallback to direct');
+            logger.info('[repo-probe] downloadFile: all mirrors unavailable, fallback to direct');
         }
     }
     candidates.push({ name: 'direct', url });
+    logger.info('[repo-probe] downloadFile: candidates=%j', candidates.map(c => c.name));
 
     let lastErr;
     for (const candidate of candidates) {
+        const lineStart = Date.now();
         try {
-            console.log('[repo-probe] downloadFile: trying %s: %s', candidate.name, candidate.url);
+            logger.info('[repo-probe] downloadFile: trying %s: %s', candidate.name, candidate.url);
             await streamDownload(candidate.url, destPath, onProgress);
-            console.log('[repo-probe] downloadFile: success via %s', candidate.name);
+            const size = fs.existsSync(destPath) ? fs.statSync(destPath).size : 0;
+            logger.info('[repo-probe] downloadFile: success via %s, size=%d bytes, elapsed=%dms',
+                candidate.name, size, Date.now() - lineStart);
             return destPath;
         } catch (e) {
             lastErr = e;
             // 清理可能产生的不完整文件，避免下一次候选误判已存在
             try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (_) { /* ignore */ }
-            console.log('[repo-probe] downloadFile: %s failed: %s', candidate.name, e.message);
+            logger.warn('[repo-probe] downloadFile: %s failed: %s (elapsed=%dms)',
+                candidate.name, e.message, Date.now() - lineStart);
         }
     }
     const reason = lastErr && lastErr.message ? lastErr.message : '未知错误';
     const isHttpStatus = /^HTTP \d+/.test(reason);
     const hint = isHttpStatus ? '' : '。可能网络不稳定或 GitHub 访问受限，请检查网络后重试';
+    logger.error('[repo-probe] downloadFile: all %d candidates failed, url=%s reason=%s elapsed=%dms',
+        candidates.length, url, reason, Date.now() - startedAt);
     throw new Error(`下载失败：${reason}${hint}`);
 }
 

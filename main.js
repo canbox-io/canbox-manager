@@ -52,6 +52,22 @@ catalogManager.setUserData(env.userData);
 const { readCanboxMeta, writeCanboxMeta, createWebMeta } = require(path.join(CORE_PATH, 'lib', 'canbox-meta'));
 const { resolveElectron } = require(path.join(CORE_PATH, 'lib', 'electron-selector'));
 
+// 通过 canbox-core 注入的 logger（log4js），写入 {usersPath}/logs/canbox.log。
+// 若 logger 未初始化（如开发环境直接 require），降级为 console。
+function _getLogger() {
+    try {
+        const loggerModule = require(path.join(CORE_PATH, 'lib', 'logger'));
+        return loggerModule.get() || console;
+    } catch (_) {
+        return console;
+    }
+}
+const logger = {
+    info: (...args) => _getLogger().info(...args),
+    warn: (...args) => _getLogger().warn(...args),
+    error: (...args) => _getLogger().error(...args)
+};
+
 let mainWindow = null;
 
 // ====== Manager 专用 IPC Handlers ======
@@ -220,6 +236,8 @@ async function importAppFromZip(zipPath, options) {
     if (!zipPath.toLowerCase().endsWith('.zip')) {
         return { success: false, error: 'Only .zip packages are supported' };
     }
+    logger.info('[importApp] start, zipPath=%s existingAppId=%s',
+        zipPath, (options && options.existingAppId) || '(new install)');
 
     let tempDir = null;
     const prevNoAsar = process.noAsar;
@@ -233,6 +251,7 @@ async function importAppFromZip(zipPath, options) {
         const tempAsarPath = path.join(tempDir, 'app.asar');
         if (fs.existsSync(tempAsarPath) && fs.statSync(tempAsarPath).isDirectory()) {
             // asar 被当目录了，从 zip 中重新提取原始数据
+            logger.warn('[importApp] app.asar extracted as directory, re-extracting raw data');
             const asarEntry = zip.getEntry('app.asar');
             if (asarEntry) {
                 fs.rmSync(tempAsarPath, { recursive: true, force: true });
@@ -244,12 +263,14 @@ async function importAppFromZip(zipPath, options) {
         // 标准 zip 结构：根目录直接含 package.json
         const pkgPath = path.join(tempDir, 'package.json');
         if (!fs.existsSync(pkgPath)) {
+            logger.error('[importApp] invalid zip: no package.json at root, zipPath=%s', zipPath);
             return { success: false, error: 'Invalid APP zip: no package.json found at root' };
         }
 
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
         const appIdentifier = pkg.id || pkg.name;
         if (!appIdentifier) {
+            logger.error('[importApp] package.json missing "id"/"name", zipPath=%s', zipPath);
             return { success: false, error: 'package.json must have "id" or "name" field' };
         }
 
@@ -257,6 +278,8 @@ async function importAppFromZip(zipPath, options) {
         const isUpdate = !!(options && options.existingAppId);
         const appId = isUpdate ? options.existingAppId : generateAppId();
         const destPath = path.join(appsDir, appId);
+        logger.info('[importApp] parsed pkg: id=%s version=%s isUpdate=%s appId=%s dest=%s',
+            appIdentifier, pkg.version || '(none)', isUpdate, appId, destPath);
 
         // 复制 APP 到 apps/{appId}/（全程用 original-fs，避免 Electron asar 补丁干扰）
         const originalFs = require('original-fs');
@@ -265,6 +288,7 @@ async function importAppFromZip(zipPath, options) {
         if (isUpdate && originalFs.existsSync(destPath)) {
             // 先 kill 运行中的 APP，释放 exe/dll/asar 文件锁
             if (isAppRunning(appId)) {
+                logger.info('[importApp] update: app is running, killing appId=%s before overwrite', appId);
                 killApp(appId);
                 // 等待进程退出、文件锁释放
                 for (let i = 0; i < 5; i++) {
@@ -280,7 +304,7 @@ async function importAppFromZip(zipPath, options) {
                     removed = !originalFs.existsSync(destPath);
                     if (removed) break;
                 } catch (e) {
-                    console.log('[importApp] rmSync attempt %d failed: %s', i + 1, e.message);
+                    logger.warn('[importApp] rmSync attempt %d failed: %s', i + 1, e.message);
                 }
                 await new Promise(r => setTimeout(r, 800));
             }
@@ -289,9 +313,9 @@ async function importAppFromZip(zipPath, options) {
                 const trashDir = destPath + '.__trash_' + Date.now();
                 try {
                     originalFs.renameSync(destPath, trashDir);
-                    console.log('[importApp] rmSync failed, renamed old dir to %s', trashDir);
+                    logger.warn('[importApp] rmSync failed, renamed old dir to %s', trashDir);
                 } catch (e) {
-                    console.error('[importApp] rename fallback also failed: %s', e.message);
+                    logger.error('[importApp] rename fallback also failed: %s', e.message);
                 }
             }
         }
@@ -305,10 +329,14 @@ async function importAppFromZip(zipPath, options) {
             let idMap = mgrStore.get('idMap') || {};
             idMap[appIdentifier] = appId;
             mgrStore.set('idMap', idMap);
+            logger.info('[importApp] idMap updated: %s -> %s', appIdentifier, appId);
         }
 
+        logger.info('[importApp] done: appId=%s id=%s version=%s isUpdate=%s',
+            appId, appIdentifier, pkg.version || '(none)', isUpdate);
         return { success: true, appId, id: appIdentifier, isUpdate };
     } catch (e) {
+        logger.error('[importApp] failed: %s (zipPath=%s)', e.message, zipPath);
         return { success: false, error: e.message };
     } finally {
         process.noAsar = prevNoAsar;
@@ -644,11 +672,15 @@ ipcMain.handle('manager.apps.repairLauncher', async (_e, appId) => {
 // 对有 installedAppId 的记录 probe 仓库最新版本，更新追踪表的 version/installedVersion/toUpdate。
 async function checkAllAppUpdates() {
     const allRecords = getAllCatalogRepoRecords();
+    const repoUrls = Object.keys(allRecords).filter(u => allRecords[u] && allRecords[u].installedAppId);
+    logger.info('[checkUpdates] start, records=%d toCheck=%d', Object.keys(allRecords).length, repoUrls.length);
     const updates = [];
-    for (const repoUrl of Object.keys(allRecords)) {
+    for (const repoUrl of repoUrls) {
         const record = allRecords[repoUrl];
-        if (!record || !record.installedAppId) continue;
+        const startedAt = Date.now();
         try {
+            logger.info('[checkUpdates] probing repoUrl=%s installedAppId=%s currentVersion=%s',
+                repoUrl, record.installedAppId, record.installedVersion || '(unknown)');
             const probed = await repoProbe.probeRepo(repoUrl);
             const installedVersion = getInstalledVersion(record.installedAppId);
             const toUpdate = !!installedVersion && installedVersion !== probed.version;
@@ -657,6 +689,8 @@ async function checkAllAppUpdates() {
             record.toUpdate = toUpdate;
             record.lastProbeAt = Date.now();
             saveCatalogRepoRecord(repoUrl, record);
+            logger.info('[checkUpdates] probed repoUrl=%s repoVersion=%s installedVersion=%s toUpdate=%s elapsed=%dms',
+                repoUrl, probed.version, installedVersion || '(unknown)', toUpdate, Date.now() - startedAt);
             if (toUpdate) {
                 updates.push({
                     repoUrl,
@@ -668,14 +702,21 @@ async function checkAllAppUpdates() {
             }
         } catch (e) {
             // 单个仓库 probe 失败不影响其他
-            console.error('[checkUpdates] probe failed for %s: %s', repoUrl, e.message);
+            logger.error('[checkUpdates] probe failed for %s: %s (elapsed=%dms)',
+                repoUrl, e.message, Date.now() - startedAt);
         }
     }
+    logger.info('[checkUpdates] done, updates=%d/%d, list=%j',
+        updates.length, repoUrls.length,
+        updates.map(u => `${u.name}: ${u.currentVersion} -> ${u.newVersion}`));
     return { success: true, updates };
 }
 
 ipcMain.handle('manager.apps.checkUpdates', async () => {
-    return checkAllAppUpdates();
+    logger.info('[ipc] manager.apps.checkUpdates invoked');
+    const result = await checkAllAppUpdates();
+    logger.info('[ipc] manager.apps.checkUpdates result: updates=%d', (result && result.updates && result.updates.length) || 0);
+    return result;
 });
 
 // -- 网页应用管理 --
@@ -1296,11 +1337,15 @@ function checkInstalled(appIdentifier) {
 function getInstalledVersion(installedAppId) {
     if (!installedAppId) return null;
     const pkgPath = path.join(USERS_PATH, 'apps', installedAppId, 'package.json');
-    if (!fs.existsSync(pkgPath)) return null;
+    if (!fs.existsSync(pkgPath)) {
+        logger.warn('[install] getInstalledVersion: package.json not found for appId=%s (%s)', installedAppId, pkgPath);
+        return null;
+    }
     try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
         return pkg.version || null;
     } catch (e) {
+        logger.warn('[install] getInstalledVersion: failed to parse package.json for appId=%s: %s', installedAppId, e.message);
         return null;
     }
 }
@@ -1318,17 +1363,24 @@ function getInstalledVersion(installedAppId) {
 async function installByRepoUrl(repoUrl, options = {}) {
     if (!repoUrl) return { success: false, error: 'repoUrl 不能为空' };
     const progressKey = repoUrl;
-    appInstallTasks.set(progressKey, { startedAt: Date.now() });
+    const startedAt = Date.now();
+    appInstallTasks.set(progressKey, { startedAt });
+    logger.info('[install] start, repoUrl=%s firstDownloadFrom=%s', repoUrl, options.firstDownloadFrom || '(none)');
     try {
         // 1. 查追踪表
         let record = getCatalogRepoRecord(repoUrl);
         const isFirstDownload = !record;
+        logger.info('[install] step1 tracking record: %s', record
+            ? `hit appId=${record.appId} version=${record.version} installedAppId=${record.installedAppId || '(none)'} installedVersion=${record.installedVersion || '(none)'}`
+            : 'miss');
 
         // 2. 缺 appId 或版本过期 → probe 补全（阈值 24 小时）
         const PROBE_STALE_MS = 24 * 60 * 60 * 1000;
         const needProbe = !record || !record.appId || !record.lastProbeAt ||
             (Date.now() - record.lastProbeAt) > PROBE_STALE_MS;
         if (needProbe) {
+            logger.info('[install] step2 probe repo (reason=%s)', !record ? 'no record'
+                : (!record.appId ? 'no appId' : 'stale'));
             const probed = await repoProbe.probeRepo(repoUrl);
             record = record || { repoUrl };
             record.appId = probed.id;
@@ -1340,18 +1392,25 @@ async function installByRepoUrl(repoUrl, options = {}) {
                 record.firstDownloadFrom = options.firstDownloadFrom;
             }
             saveCatalogRepoRecord(repoUrl, record);
+            logger.info('[install] step2 probe done: id=%s name=%s version=%s', probed.id, probed.name, probed.version);
+        } else {
+            logger.info('[install] step2 skip probe (record fresh)');
         }
 
         // 3. 判断安装状态（复用全局 idMap）
         const existingAppId = record.installedAppId || checkInstalled(record.appId);
         const installedVersion = getInstalledVersion(existingAppId);
         const isUpdate = !!existingAppId && installedVersion !== record.version;
+        logger.info('[install] step3 state: appId=%s existingAppId=%s installedVersion=%s repoVersion=%s isUpdate=%s installed=%s',
+            record.appId, existingAppId || '(none)', installedVersion || '(none)', record.version, isUpdate, !!existingAppId);
 
         // 4. 下载（复用现有逻辑，与原 installRepo 完全相同）
         const downloadUrl = await repoProbe.getReleaseDownloadUrl(
             repoUrl, record.appId || record.name, record.name, record.version
         );
         if (!downloadUrl) {
+            logger.error('[install] step4 release asset not found, repoUrl=%s name=%s version=%s',
+                repoUrl, record.name, record.version);
             return {
                 success: false,
                 error: `未找到 ${record.name} v${record.version} 的 release 下载资产，请确认仓库已发布对应版本`
@@ -1359,11 +1418,13 @@ async function installByRepoUrl(repoUrl, options = {}) {
         }
         const os = require('os');
         const zipPath = path.join(os.tmpdir(), `canbox-install-${Date.now()}.zip`);
+        logger.info('[install] step4 downloading: url=%s dest=%s', downloadUrl, zipPath);
         let lastProgress = 0;
         await repoProbe.downloadFile(downloadUrl, zipPath, (progress) => {
             // 节流发送进度（以 repoUrl 为 key，三组统一）
             if (progress - lastProgress >= 10) {
                 lastProgress = progress;
+                logger.info('[install] download progress=%d%% repoUrl=%s', progress, repoUrl);
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('manager.repos.installProgress', {
                         repoUrl, progress
@@ -1371,15 +1432,19 @@ async function installByRepoUrl(repoUrl, options = {}) {
                 }
             }
         });
+        logger.info('[install] step4 download done, elapsed=%dms', Date.now() - startedAt);
 
         // 5. 安装（复用 importAppFromZip，更新场景复用原 appId 目录）
         const importOptions = existingAppId ? { existingAppId } : {};
+        logger.info('[install] step5 import zip: existingAppId=%s', existingAppId || '(new install)');
         const importResult = await importAppFromZip(zipPath, importOptions);
         try { fs.unlinkSync(zipPath); } catch (e) {}
 
         if (!importResult.success) {
+            logger.error('[install] step5 import failed: %s', importResult.error);
             return { success: false, error: importResult.error };
         }
+        logger.info('[install] step5 import done: appId=%s', importResult.appId);
 
         // 6. 更新追踪表
         record.installedAppId = importResult.appId;
@@ -1387,15 +1452,21 @@ async function installByRepoUrl(repoUrl, options = {}) {
         record.toUpdate = false;
         record.lastDownloadAt = Date.now();
         saveCatalogRepoRecord(repoUrl, record);
+        logger.info('[install] step6 tracking updated: installedAppId=%s installedVersion=%s',
+            record.installedAppId, record.installedVersion || '(unknown)');
 
         // 7. 生成 launcher
         const appInfo = readAppInfo(importResult.appId);
         if (appInfo && !shouldSkipLauncherForApp(importResult.appId)) {
             appLauncher.generateLauncher(appInfo);
+            logger.info('[install] step7 launcher generated for appId=%s', importResult.appId);
         }
 
+        logger.info('[install] success, repoUrl=%s appId=%s isUpdate=%s elapsed=%dms',
+            repoUrl, importResult.appId, isUpdate, Date.now() - startedAt);
         return { success: true, appId: importResult.appId, isUpdate };
     } catch (e) {
+        logger.error('[install] failed, repoUrl=%s error=%s elapsed=%dms', repoUrl, e.message, Date.now() - startedAt);
         return { success: false, error: e.message };
     } finally {
         appInstallTasks.delete(progressKey);
@@ -1671,7 +1742,12 @@ ipcMain.handle('manager.catalog.getRepoMarkdown', async (_e, repoUrl, filePath, 
 // -- 统一下载入口（默认组 / 内置仓库源 / 自定义仓库源 共用）--
 
 ipcMain.handle('manager.catalog.install', async (_e, repoUrl, options) => {
-    return await installByRepoUrl(repoUrl, options || {});
+    logger.info('[ipc] manager.catalog.install invoked: repoUrl=%s options=%j', repoUrl, options || {});
+    const result = await installByRepoUrl(repoUrl, options || {});
+    logger.info('[ipc] manager.catalog.install result: success=%s appId=%s isUpdate=%s error=%s',
+        result && result.success, (result && result.appId) || '(none)', (result && result.isUpdate) || false,
+        (result && result.error) || '(none)');
+    return result;
 });
 
 // 单条查询：渲染层按 repoUrl 查安装状态（徽标用）
@@ -2450,11 +2526,16 @@ app.whenReady().then(() => {
 
     // 启动 30s 后后台检查 APP 更新（不阻塞启动）
     setTimeout(() => {
+        logger.info('[startup] background APP update check triggered');
         checkAllAppUpdates().then(result => {
+            const count = (result && result.updates && result.updates.length) || 0;
+            logger.info('[startup] background APP update check done, updates=%d', count);
             if (result.success && result.updates.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('manager.apps.updatesAvailable', result.updates);
             }
-        }).catch(() => {});
+        }).catch((e) => {
+            logger.error('[startup] background APP update check failed: %s', e && e.message);
+        });
     }, 30000);
 
     // 启动 30s 后后台预热内置 Catalog 源，并按 nextRefresh 定期刷新（不阻塞启动、失败静默）
