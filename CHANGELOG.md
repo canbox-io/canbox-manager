@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.0] - 2026-10-10
+
+### fix | 问题修复 / Bug Fixes
+
+修复“我的应用”页手动导入已安装 APP 的新版本时未覆盖旧版本、而是生成重复应用的问题，现按 APP 标识复用原安装目录执行覆盖式更新
+
+Fix duplicate app entries being created instead of overwriting when manually importing a newer version of an already-installed APP; the import now reuses the existing install directory by APP identifier
+
+### chore | 维护 / Maintenance
+
+版本号升级至 0.3.0，并将 Node.js 版本要求调整为 >=24.15.0
+
+Bump version to 0.3.0 and adjust the required Node.js version to >=24.15.0
+
 ## [0.2.9] - 2026-10-08
 
 ### fix | 问题修复 / Bug Fixes
