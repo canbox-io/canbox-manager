@@ -275,8 +275,10 @@ async function importAppFromZip(zipPath, options) {
         }
 
         // 覆盖式更新：复用原 appId 和目录；新装：生成随机 appId
-        const isUpdate = !!(options && options.existingAppId);
-        const appId = isUpdate ? options.existingAppId : generateAppId();
+        // 未显式指定 existingAppId 时，按标识查 idMap：命中说明同一 APP 已安装，走覆盖式更新，复用原目录
+        const installedAppId = (options && options.existingAppId) || checkInstalled(appIdentifier);
+        const isUpdate = !!installedAppId;
+        const appId = isUpdate ? installedAppId : generateAppId();
         const destPath = path.join(appsDir, appId);
         logger.info('[importApp] parsed pkg: id=%s version=%s isUpdate=%s appId=%s dest=%s',
             appIdentifier, pkg.version || '(none)', isUpdate, appId, destPath);
