@@ -12,6 +12,20 @@ import WebAppEditor from './WebAppEditor.vue';
 const { t } = useI18n();
 const router = useRouter();
 const appsStore = useAppsStore();
+
+// 分类筛选（固定枚举 9 项 + other，与 canbox-core APP_CATEGORIES 一致）
+const CATEGORY_FILTERS = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
+const categoryFilter = ref('');
+
+function categoryLabel(cat) {
+    return t(`catalog.category_${cat}`);
+}
+
+const filteredApps = computed(() => {
+    if (!categoryFilter.value) return appsStore.apps;
+    return appsStore.apps.filter(a => a.category === categoryFilter.value);
+});
+
 const reposStore = useReposStore();
 const importing = ref(false);
 // installingDeveloper 提升至 store，避免路由切换组件卸载后状态丢失
@@ -404,6 +418,21 @@ async function installDeveloper() {
             </div>
         </div>
 
+        <div v-if="!appsStore.loading && appsStore.apps.length > 0" class="category-filter-bar">
+            <button
+                class="category-filter-btn"
+                :class="{ active: categoryFilter === '' }"
+                @click="categoryFilter = ''"
+            >{{ $t('catalog.allCategories') }}</button>
+            <button
+                v-for="cat in CATEGORY_FILTERS"
+                :key="cat"
+                class="category-filter-btn"
+                :class="{ active: categoryFilter === cat }"
+                @click="categoryFilter = cat"
+            >{{ categoryLabel(cat) }}</button>
+        </div>
+
         <div v-if="appsStore.loading" class="loading-state">
             <span class="spinner"></span>
         </div>
@@ -417,7 +446,7 @@ async function installDeveloper() {
         </div>
 
         <div v-else class="app-list">
-            <div v-for="app in appsStore.apps" :key="app.appId" class="app-card" :class="{ 'app-card-missing-electron': needDownloadElectron(app) }">
+            <div v-for="app in filteredApps" :key="app.appId" class="app-card" :class="{ 'app-card-missing-electron': needDownloadElectron(app) }">
                 <!-- Logo -->
                 <div class="logo-section">
                     <img v-if="app.logo" :src="app.logo" :alt="app.name" />
@@ -489,6 +518,10 @@ async function installDeveloper() {
                     <div class="app-desc">{{ app.description || $t('apps.noDesc') }}</div>
                     <div class="app-id">{{ app.appId }}</div>
 
+                    <!-- 分类标签 -->
+                    <div v-if="app.category" class="app-category">
+                        <span class="category-tag">{{ categoryLabel(app.category) }}</span>
+                    </div>
                     <!-- keywords 标签 -->
                     <div v-if="app.keywords && app.keywords.length > 0" class="app-keywords">
                         <span v-for="kw in app.keywords" :key="kw" class="keyword-tag">#{{ kw }}</span>
@@ -986,5 +1019,43 @@ async function installDeveloper() {
         flex: 1;
         justify-content: center;
     }
+}
+
+.category-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--el-border-color-light);
+    flex-shrink: 0;
+}
+.category-filter-btn {
+    padding: 4px 14px;
+    border: 1px solid var(--el-border-color);
+    background: var(--el-bg-color);
+    border-radius: 16px;
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.category-filter-btn:hover {
+    border-color: var(--el-color-primary);
+    color: var(--el-color-primary);
+}
+.category-filter-btn.active {
+    background: var(--el-color-primary);
+    border-color: var(--el-color-primary);
+    color: #fff;
+}
+.app-category {
+    margin-top: 6px;
+}
+.category-tag {
+    font-size: 12px;
+    color: var(--el-color-primary);
+    background: var(--el-color-primary-light-9);
+    border-radius: 4px;
+    padding: 1px 8px;
 }
 </style>

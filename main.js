@@ -197,6 +197,8 @@ ipcMain.handle('manager.apps.list', async () => {
                         isPwa: !!(webApp && webApp.isPwa),
                         // 网页 APP 的完整配置（编辑时预填充用）
                         webAppConfig: (metaType === 'web' && webApp) ? webApp : null,
+                        // 分类：取 .canbox-app 已归一化的 category，缺省归 other
+                        category: (meta && meta.category) || 'other',
                         // electron 版本状态：ok=true 表示已就绪；ok=false 时附 needDownload/version
                         electronStatus,
                         logo,
@@ -1541,6 +1543,7 @@ ipcMain.handle('manager.repos.add', async (_e, url) => {
             logoExt: probed.logoExt || null,
             keywords: probed.keywords,
             platforms: probed.platforms,
+            category: probed.category || 'other',
             branch: probed.branch,
             readmeExt: probed.readme ? 'md' : null,
             lastError: null,
@@ -1614,6 +1617,7 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             logoExt: probed.logoExt || null,
             keywords: probed.keywords,
             platforms: probed.platforms,
+            category: probed.category || 'other',
             branch: probed.branch,
             readmeExt: probed.readme ? 'md' : null,
             lastError: null,

@@ -148,7 +148,17 @@
         "status_warning": "Warning",
         "status_critical": "Critical",
         "status_stale": "Stale",
-        "status_removed": "Removed"
+        "status_removed": "Removed",
+        "category_development": "Development",
+        "category_utility": "Utility",
+        "category_office": "Office",
+        "category_network": "Network",
+        "category_audio": "Audio",
+        "category_video": "Video",
+        "category_game": "Game",
+        "category_graphics": "Graphics",
+        "category_education": "Education",
+        "category_other": "Other"
     },
     "settings": {
         "title": "Settings",

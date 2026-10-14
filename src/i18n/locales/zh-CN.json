@@ -144,7 +144,17 @@
         "status_warning": "警告",
         "status_critical": "风险",
         "status_stale": "停滞",
-        "status_removed": "已移除"
+        "status_removed": "已移除",
+        "category_development": "开发工具",
+        "category_utility": "工具",
+        "category_office": "办公",
+        "category_network": "网络",
+        "category_audio": "音频",
+        "category_video": "视频",
+        "category_game": "游戏",
+        "category_graphics": "图形",
+        "category_education": "教育",
+        "category_other": "其他"
     },
     "settings": {
         "title": "设置",

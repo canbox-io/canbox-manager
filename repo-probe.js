@@ -10,6 +10,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { normalizeCategory } = require(path.join(global.__CANBOX_CORE_PATH__, 'lib', 'category'));
 
 // 通过 canbox-core 注入的 logger（log4js），写入 {usersPath}/logs/canbox.log
 // 若 logger 未初始化（如开发环境直接 require），降级为 console。
@@ -362,6 +363,20 @@ async function probeRepo(repoUrl, options = {}) {
     }
     logger.info('[repo-probe] probeRepo: pkg id=%s name=%s version=%s', pkg.id, pkg.name, pkg.version);
 
+    // 拉取 .canbox-app 读取 category（分类来源唯一字段）
+    let category = 'other';
+    try {
+        const canboxAppUrl = getRawUrl(repoUrl, branch, '.canbox-app');
+        const canboxResult = await fetchText(canboxAppUrl);
+        if (canboxResult.text) {
+            const canboxApp = JSON.parse(canboxResult.text);
+            category = normalizeCategory(canboxApp.category);
+        }
+    } catch (e) {
+        // .canbox-app 不存在或解析失败时 category 保持 'other'，不阻断探测
+        logger.info('[repo-probe] probeRepo: .canbox-app category read skipped: %s', e.message);
+    }
+
     // logo / readme 仅在需要展示元数据时拉取，避免 update-check 等场景无谓的网络请求
     let logoBuf = null;
     let logoExt = null;
@@ -396,6 +411,7 @@ async function probeRepo(repoUrl, options = {}) {
         logoExt,
         keywords: pkg.keywords || [],
         platforms: pkg.platforms || [],
+        category,
         branch,
         readme
     };

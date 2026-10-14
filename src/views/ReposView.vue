@@ -11,6 +11,18 @@ const { t } = useI18n();
 const reposStore = useReposStore();
 const catalogStore = useCatalogStore();
 
+// 分类筛选（固定枚举 9 项 + other，与 canbox-core APP_CATEGORIES 一致）
+const CATEGORY_FILTERS = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
+// 分类筛选值绑定到 catalog store，默认组与 catalog 组共用
+const categoryFilter = computed({
+    get: () => catalogStore.categoryFilter,
+    set: (v) => catalogStore.setCategory(v)
+});
+
+function categoryLabel(cat) {
+    return t(`catalog.category_${cat}`);
+}
+
 const showAddDialog = ref(false);
 const addForm = ref({ url: '' });
 const adding = ref(false);
@@ -665,7 +677,7 @@ const searchTotal = computed(() =>
                                     <div class="catalog-desc">{{ catalogStore.matchLang(item) }}</div>
                                     <div class="repo-meta-row">
                                         <span v-if="item.appVersion" class="meta-chip">v{{ item.appVersion }}</span>
-                                        <span v-if="item.category" class="meta-chip">{{ item.category }}</span>
+                                        <span v-if="item.category" class="meta-chip">{{ categoryLabel(item.category) }}</span>
                                         <span v-if="item.stars" class="meta-chip">★ {{ formatNumber(item.stars) }}</span>
                                     </div>
                                 </div>
@@ -734,6 +746,36 @@ const searchTotal = computed(() =>
             </div>
         </div>
 
+        <div v-if="!isDefault && catalogStore.currentApps.length > 0" class="category-filter-bar">
+            <button
+                class="category-filter-btn"
+                :class="{ active: categoryFilter === '' }"
+                @click="categoryFilter = ''"
+            >{{ $t('catalog.allCategories') }}</button>
+            <button
+                v-for="cat in CATEGORY_FILTERS"
+                :key="cat"
+                class="category-filter-btn"
+                :class="{ active: categoryFilter === cat }"
+                @click="categoryFilter = cat"
+            >{{ categoryLabel(cat) }}</button>
+        </div>
+
+        <div v-if="isDefault && reposStore.repos.length > 0" class="category-filter-bar">
+            <button
+                class="category-filter-btn"
+                :class="{ active: categoryFilter === '' }"
+                @click="categoryFilter = ''"
+            >{{ $t('catalog.allCategories') }}</button>
+            <button
+                v-for="cat in CATEGORY_FILTERS"
+                :key="cat"
+                class="category-filter-btn"
+                :class="{ active: categoryFilter === cat }"
+                @click="categoryFilter = cat"
+            >{{ categoryLabel(cat) }}</button>
+        </div>
+
         <div class="repo-list">
             <!-- 空状态：还没有任何仓库 + 默认源 -->
             <el-empty v-if="isDefault && !reposStore.loading && reposStore.repos.length === 0" :description="$t('repos.empty')">
@@ -747,7 +789,7 @@ const searchTotal = computed(() =>
 
             <!-- 默认源：用户仓库列表 -->
             <template v-if="isDefault">
-                <div v-for="repo in reposStore.repos" :key="repo.id" class="repo-card">
+                <div v-for="repo in reposStore.repos.filter(r => !categoryFilter || r.category === categoryFilter)" :key="repo.id" class="repo-card">
                     <img v-if="repo.logoExt" :src="repoLogoSrc(repo)" class="repo-logo" alt="logo" />
                     <div v-else class="repo-logo-placeholder">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="26" height="26"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" /></svg>
@@ -765,6 +807,7 @@ const searchTotal = computed(() =>
                                 <span v-for="p in getPlatforms(repo)" :key="p" class="platform-badge" v-html="PLATFORM_ICONS_SVG[p]" :title="PLATFORM_NAMES[p]" />
                             </div>
                             <span v-if="repo.version" class="meta-chip">v{{ repo.version }}</span>
+                            <span v-if="repo.category" class="meta-chip">{{ categoryLabel(repo.category) }}</span>
                             <span v-if="repo.lastSyncAt" class="meta-chip">
                                 {{ $t('repos.lastSync') }}: {{ new Date(repo.lastSyncAt).toLocaleString() }}
                             </span>
@@ -842,7 +885,7 @@ const searchTotal = computed(() =>
                             <div class="catalog-desc">{{ catalogStore.matchLang(app) }}</div>
                             <div class="repo-meta-row catalog-meta">
                                 <span v-if="app.appVersion" class="meta-chip">v{{ app.appVersion }}</span>
-                                <span v-if="app.category" class="meta-chip">{{ app.category }}</span>
+                                <span v-if="app.category" class="meta-chip">{{ categoryLabel(app.category) }}</span>
                                 <span class="meta-chip" v-if="app.stars != null">★ {{ formatNumber(app.stars) }}</span>
                                 <span class="meta-chip" v-if="app.forks != null">⑂ {{ formatNumber(app.forks) }}</span>
                                 <span v-if="app.license" class="meta-chip">{{ app.license }}</span>
@@ -1472,5 +1515,33 @@ const searchTotal = computed(() =>
     box-shadow: none;
     background: var(--el-fill-color-blank);
     border: 1px solid var(--el-border-color-lighter);
+}
+
+.category-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 24px;
+    background: var(--el-bg-color);
+    border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.category-filter-btn {
+    padding: 4px 14px;
+    border: 1px solid var(--el-border-color);
+    background: var(--el-bg-color);
+    border-radius: 16px;
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.category-filter-btn:hover {
+    border-color: var(--el-color-primary);
+    color: var(--el-color-primary);
+}
+.category-filter-btn.active {
+    background: var(--el-color-primary);
+    border-color: var(--el-color-primary);
+    color: #fff;
 }
 </style>

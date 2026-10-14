@@ -35,12 +35,10 @@ export const useCatalogStore = defineStore('catalog', () => {
     const categoryFilter = ref('');
     const sortBy = ref('stars');
 
-    const allCategories = computed(() => {
-        const apps = currentApps.value;
-        const cats = new Set();
-        apps.forEach(a => { if (a.category) cats.add(a.category); });
-        return Array.from(cats).sort();
-    });
+    // 分类固定枚举（与 canbox-core APP_CATEGORIES 一致的 9 项 + other 展示桶），顺序固定
+    const ALL_CATEGORIES = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
+
+    const allCategories = computed(() => ALL_CATEGORIES);
 
     function isZh() {
         return (i18n.global.locale?.value || i18n.global.locale || '').startsWith('zh');
