@@ -4,6 +4,18 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.1] - 2026-10-14
+
+### feat | 新功能 / Features
+
+新增 APP 分类功能：应用仓库、我的应用、Catalog 浏览均支持按分类筛选与展示
+仓库探测与 APP 列表读取 `.canbox-app` 的 `category` 字段并归一化，缺失或非法值归为 other
+补充中英文分类名称文案
+
+Add APP category support: Repositories, My Apps and Catalog now support filtering and displaying apps by category
+Repo probe and app list read and normalize the `category` field from `.canbox-app`; missing or invalid values fall back to other
+Add Chinese and English category name translations
+
 ## [0.3.0] - 2026-10-10
 
 ### fix | 问题修复 / Bug Fixes
