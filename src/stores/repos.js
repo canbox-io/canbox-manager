@@ -79,8 +79,8 @@ export const useReposStore = defineStore('repos', () => {
                 if (options.firstDownloadFrom === 'default') {
                     await fetchRepos();
                 }
-                // 刷新该 repoUrl 的安装状态缓存
-                await refreshInstallStates([repoUrl]);
+                // 刷新该 repoUrl 的安装状态缓存（需传对象格式 [{ repoUrl, latestVersion? }]）
+                await refreshInstallStates([{ repoUrl }]);
             }
             return result;
         } finally {
