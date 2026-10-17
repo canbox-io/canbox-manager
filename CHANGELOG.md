@@ -4,6 +4,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.2] - 2026-10-17
+
+### feat | 新功能 / Features
+
+关于页面顶部新增 GitHub 仓库与项目主页入口，项目主页地址更新为 canbox-pages 官网，并补充中英文文案
+网页应用信息抓取支持非 PWA 页面回退解析 HTML
+
+Add GitHub repository and homepage entries to the About page header, update the homepage URL to the canbox-pages site, and add Chinese and English translations
+Web app metadata scraping now falls back to parsing HTML for non-PWA pages
+
+### fix | 问题修复 / Bug Fixes
+
+调整 refreshInstallStates 调用参数为对象格式，修复更新 APP 后“已下载/可更新”徽标未刷新的问题
+
+Fix the stale installed-badge after updating an APP by passing an object argument to refreshInstallStates
+
 ## [0.3.1] - 2026-10-14
 
 ### feat | 新功能 / Features
