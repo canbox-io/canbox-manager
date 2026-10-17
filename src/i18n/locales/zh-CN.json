@@ -206,6 +206,7 @@
         "license": "许可证",
         "author": "作者",
         "homepage": "项目主页",
+        "github": "GitHub 仓库",
         "checkUpdate": "检查更新",
         "update": {
             "title": "更新",
