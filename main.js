@@ -726,21 +726,151 @@ ipcMain.handle('manager.apps.checkUpdates', async () => {
 // -- 网页应用管理 --
 // 将网址封装为最小化 Electron 网页壳 APP，存到 apps/{appId}/，走标准启动流程。
 // 生成的 APP 伪装 Chrome UA，提供菜单栏（含上一步/下一步），支持后续编辑。
-// PWA manifest 抓取：fetch 目标 URL 的 HTML，找 <link rel="manifest">，预填表单。
+// 信息抓取：优先 PWA manifest；非 PWA 页面回退解析 HTML（og:title/application-name/<title> + icon link + theme-color），预填表单。
 
 // Chrome UA 伪装（避免网站识别为非标准浏览器而限制功能）
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
+// 扩展名 → MIME 映射（服务器未返回 content-type 时按扩展名推断）
+const ICON_MIME_BY_EXT = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    ico: 'image/x-icon'
+};
+
 /**
- * 抓取目标 URL 的 PWA manifest 信息，用于预填创建表单
- * 失败时返回 { success: false }，前端静默回退到手填模式
+ * 下载图标并转为 base64 data URI（仅接受位图，拒绝 SVG）
+ * @param {string} iconUrl 图标绝对 URL
+ * @returns {Promise<string>} data URI，失败返回 ''
  */
-async function fetchWebAppManifest(url) {
+async function downloadIconDataUri(iconUrl) {
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(iconUrl, {
+            signal: controller.signal,
+            headers: { 'User-Agent': CHROME_UA }
+        });
+        clearTimeout(timeout);
 
-        // 1. fetch HTML
+        if (!res.ok) return '';
+
+        let mime = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (!mime.startsWith('image/')) {
+            const ext = (new URL(iconUrl).pathname.split('.').pop() || '').toLowerCase();
+            mime = ICON_MIME_BY_EXT[ext] || '';
+        }
+        // 拒绝 SVG 与无法识别的类型（部分桌面环境无法显示 SVG，且最终要写入 logo.png）
+        if (!mime || mime.includes('svg')) return '';
+
+        const buf = Buffer.from(await res.arrayBuffer());
+        // 超过 2MB 视为异常资源，跳过
+        if (!buf.length || buf.length > 2 * 1024 * 1024) return '';
+        return `data:${mime};base64,${buf.toString('base64')}`;
+    } catch (e) {
+        return '';
+    }
+}
+
+// 解码常见 HTML 实体（标题/名称中可能出现 &amp; &#39; 等）
+function decodeHtmlEntities(str) {
+    if (!str) return '';
+    return str
+        .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+}
+
+/**
+ * 从 HTML 提取页面名称（og:title → application-name → <title>）
+ */
+function extractHtmlTitle(html) {
+    const metaOg = html.match(/<meta[^>]+property=["']og:title["'][^>]*>/i);
+    if (metaOg) {
+        const m = metaOg[0].match(/content=["']([^"']*)["']/i);
+        if (m && m[1].trim()) return decodeHtmlEntities(m[1].trim());
+    }
+    const metaApp = html.match(/<meta[^>]+name=["']application-name["'][^>]*>/i);
+    if (metaApp) {
+        const m = metaApp[0].match(/content=["']([^"']*)["']/i);
+        if (m && m[1].trim()) return decodeHtmlEntities(m[1].trim());
+    }
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (titleMatch) {
+        const text = titleMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (text) return decodeHtmlEntities(text);
+    }
+    return '';
+}
+
+/**
+ * 从 HTML 提取主题色（<meta name="theme-color">）
+ */
+function extractHtmlThemeColor(html) {
+    const meta = html.match(/<meta[^>]+name=["']theme-color["'][^>]*>/i);
+    if (meta) {
+        const m = meta[0].match(/content=["']([^"']*)["']/i);
+        if (m && m[1].trim()) return m[1].trim();
+    }
+    return '';
+}
+
+/**
+ * 从 HTML 收集图标候选 URL（rel 含 icon 的 <link> + 兜底 /favicon.ico）
+ * PNG 优先、按尺寸降序，最终写入 logo.png 故只要位图
+ */
+function collectHtmlIconCandidates(html, baseUrl) {
+    const urls = [];
+    const linkRe = /<link\b[^>]*\brel=["'][^"']*icon[^"']*["'][^>]*>/gi;
+    let m;
+    while ((m = linkRe.exec(html)) !== null) {
+        const tag = m[0];
+        const hrefMatch = tag.match(/href=["']([^"']+)["']/i);
+        if (!hrefMatch) continue;
+        let size = 0;
+        const sizesMatch = tag.match(/sizes=["']([^"']*)["']/i);
+        if (sizesMatch) {
+            const parsed = parseInt(sizesMatch[1], 10);
+            if (!isNaN(parsed)) size = parsed;
+        }
+        let abs;
+        try {
+            abs = new URL(hrefMatch[1], baseUrl).href;
+        } catch (e) {
+            continue;
+        }
+        // PNG 加权，优先位图
+        if (/\.png(\?|#|$)/i.test(hrefMatch[1]) || /type=["']image\/png["']/i.test(tag)) size += 10000;
+        urls.push({ url: abs, size });
+    }
+    // 兜底站点根 favicon.ico
+    try {
+        urls.push({ url: new URL('/favicon.ico', baseUrl).href, size: -1 });
+    } catch (e) {}
+    return urls.sort((a, b) => b.size - a.size).map(c => c.url);
+}
+
+/**
+ * 抓取目标 URL 的信息，用于预填创建表单
+ * 优先 PWA manifest；非 PWA 页面回退解析 HTML
+ * 失败时返回 { success: false }，前端静默回退到手填模式
+ */
+async function fetchWebAppManifest(url) {
+    let html = '';
+    let finalUrl = url;
+
+    // 1. fetch HTML
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
         const res = await fetch(url, {
             signal: controller.signal,
             redirect: 'follow',
@@ -752,86 +882,93 @@ async function fetchWebAppManifest(url) {
             return { success: false, error: `HTTP ${res.status}` };
         }
 
-        const html = await res.text();
-        const finalUrl = res.url; // 重定向后的最终 URL
-
-        // 2. 找 <link rel="manifest" href="...">
-        const manifestMatch = html.match(/<link[^>]+rel=["']manifest["'][^>]*>/i);
-        if (!manifestMatch) {
-            return { success: false, error: 'No manifest link found' };
-        }
-
-        const hrefMatch = manifestMatch[0].match(/href=["']([^"']+)["']/i);
-        if (!hrefMatch) {
-            return { success: false, error: 'Manifest link has no href' };
-        }
-
-        // manifest URL 解析（相对路径 → 绝对路径）
-        const manifestUrl = new URL(hrefMatch[1], finalUrl).href;
-
-        // 3. fetch manifest.json
-        const controller2 = new AbortController();
-        const timeout2 = setTimeout(() => controller2.abort(), 5000);
-        const manifestRes = await fetch(manifestUrl, {
-            signal: controller2.signal,
-            headers: { 'User-Agent': CHROME_UA }
-        });
-        clearTimeout(timeout2);
-
-        if (!manifestRes.ok) {
-            return { success: false, error: `Manifest HTTP ${manifestRes.status}` };
-        }
-
-        const manifest = await manifestRes.json();
-
-        // 4. 选最大尺寸 PNG 图标下载
-        let iconBase64 = '';
-        if (Array.isArray(manifest.icons) && manifest.icons.length > 0) {
-            // 过滤 PNG 图标（避免 SVG 在某些桌面环境不显示）
-            const pngIcons = manifest.icons.filter(i => (i.src || '').toLowerCase().endsWith('.png'));
-            const candidates = pngIcons.length > 0 ? pngIcons : manifest.icons;
-            // 按 sizes 排序选最大（"512x512" → 512）
-            const sorted = candidates.slice().sort((a, b) => {
-                const sa = parseInt((a.sizes || '0').split('x')[0], 10) || 0;
-                const sb = parseInt((b.sizes || '0').split('x')[0], 10) || 0;
-                return sb - sa;
-            });
-            const icon = sorted[0];
-            if (icon.src) {
-                const iconUrl = new URL(icon.src, manifestUrl).href;
-                try {
-                    const controller3 = new AbortController();
-                    const timeout3 = setTimeout(() => controller3.abort(), 5000);
-                    const iconRes = await fetch(iconUrl, {
-                        signal: controller3.signal,
-                        headers: { 'User-Agent': CHROME_UA }
-                    });
-                    clearTimeout(timeout3);
-                    if (iconRes.ok) {
-                        const buf = Buffer.from(await iconRes.arrayBuffer());
-                        iconBase64 = `data:image/png;base64,${buf.toString('base64')}`;
-                    }
-                } catch (e) {
-                    // 图标下载失败不影响 manifest 抓取
-                }
-            }
-        }
-
-        return {
-            success: true,
-            manifestUrl,
-            finalUrl,
-            name: manifest.name || manifest.short_name || '',
-            shortName: manifest.short_name || '',
-            themeColor: manifest.theme_color || '',
-            backgroundColor: manifest.background_color || '',
-            display: manifest.display || '',
-            icon: iconBase64,
-            isPwa: true
-        };
+        html = await res.text();
+        finalUrl = res.url; // 重定向后的最终 URL
     } catch (e) {
         return { success: false, error: e.message };
     }
+
+    // 2. 尝试 PWA manifest
+    try {
+        const manifestMatch = html.match(/<link[^>]+rel=["']manifest["'][^>]*>/i);
+        if (manifestMatch) {
+            const hrefMatch = manifestMatch[0].match(/href=["']([^"']+)["']/i);
+            if (hrefMatch) {
+                // manifest URL 解析（相对路径 → 绝对路径）
+                const manifestUrl = new URL(hrefMatch[1], finalUrl).href;
+
+                const controller2 = new AbortController();
+                const timeout2 = setTimeout(() => controller2.abort(), 5000);
+                const manifestRes = await fetch(manifestUrl, {
+                    signal: controller2.signal,
+                    headers: { 'User-Agent': CHROME_UA }
+                });
+                clearTimeout(timeout2);
+
+                if (manifestRes.ok) {
+                    const manifest = await manifestRes.json();
+
+                    // 选最大尺寸 PNG 图标下载（依次尝试前 3 个，失败继续）
+                    let iconBase64 = '';
+                    if (Array.isArray(manifest.icons) && manifest.icons.length > 0) {
+                        // 过滤 PNG 图标（避免 SVG 在某些桌面环境不显示）
+                        const pngIcons = manifest.icons.filter(i => (i.src || '').toLowerCase().endsWith('.png'));
+                        const candidates = pngIcons.length > 0 ? pngIcons : manifest.icons;
+                        // 按 sizes 排序选最大（"512x512" → 512）
+                        const sorted = candidates.slice().sort((a, b) => {
+                            const sa = parseInt((a.sizes || '0').split('x')[0], 10) || 0;
+                            const sb = parseInt((b.sizes || '0').split('x')[0], 10) || 0;
+                            return sb - sa;
+                        });
+                        for (const icon of sorted.slice(0, 3)) {
+                            if (!icon.src) continue;
+                            const iconUrl = new URL(icon.src, manifestUrl).href;
+                            iconBase64 = await downloadIconDataUri(iconUrl);
+                            if (iconBase64) break;
+                        }
+                    }
+
+                    return {
+                        success: true,
+                        manifestUrl,
+                        finalUrl,
+                        name: manifest.name || manifest.short_name || '',
+                        shortName: manifest.short_name || '',
+                        themeColor: manifest.theme_color || '',
+                        backgroundColor: manifest.background_color || '',
+                        display: manifest.display || '',
+                        icon: iconBase64,
+                        isPwa: true
+                    };
+                }
+            }
+        }
+    } catch (e) {
+        // manifest 抓取失败 → 落入 HTML 回退
+    }
+
+    // 3. HTML 回退（非 PWA 页面）：从页面本身提取名称/图标/主题色
+    const name = extractHtmlTitle(html);
+    const themeColor = extractHtmlThemeColor(html);
+    const iconUrls = collectHtmlIconCandidates(html, finalUrl);
+    let iconBase64 = '';
+    for (const iconUrl of iconUrls.slice(0, 4)) {
+        iconBase64 = await downloadIconDataUri(iconUrl);
+        if (iconBase64) break;
+    }
+
+    return {
+        success: true,
+        manifestUrl: '',
+        finalUrl,
+        name,
+        shortName: '',
+        themeColor,
+        backgroundColor: '',
+        display: '',
+        icon: iconBase64,
+        isPwa: false
+    };
 }
 
 ipcMain.handle('manager.webapp.fetchManifest', async (_e, url) => {

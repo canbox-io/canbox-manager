@@ -9,7 +9,8 @@
  * 创建模式：表单为空，提交时调 createWebApp
  * 编辑模式：表单预填充 editApp 的 canbox.webApp 配置，提交时调 editWebApp
  *
- * PWA manifest 抓取：输入 URL 后点"自动抓取"按钮，主进程 fetch manifest 预填表单。
+ * 信息抓取：输入 URL 后点"自动抓取"按钮，主进程优先抓 PWA manifest，
+ * 非 PWA 页面回退解析 HTML（og:title/application-name/<title> + favicon link），预填表单。
  * 失败时静默回退手填模式（仅提示一下，不阻塞）。
  */
 import { ref, reactive, watch, computed } from 'vue';
@@ -170,9 +171,9 @@ async function handleFetchManifest() {
             if (result.themeColor) form.themeColor = result.themeColor;
             // 用重定向后的最终 URL 替换
             if (result.finalUrl) form.url = result.finalUrl;
-            form.isPwa = true;
+            form.isPwa = !!result.isPwa;
             form.manifestUrl = result.manifestUrl || '';
-            notification.success(t('webApp.fetchSuccess'));
+            notification.success(t(result.isPwa ? 'webApp.fetchSuccess' : 'webApp.fetchHtmlSuccess'));
         } else {
             // 静默回退：仅提示，不阻塞
             form.isPwa = false;
