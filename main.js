@@ -988,9 +988,8 @@ function renderWebAppMainJs(config) {
     const appId = (config.appId || '').replace(/'/g, "\\'");
     const menuBar = config.menuBar !== false;
 
-    // 菜单模板（仅当 menuBar=true 时调用 setApplicationMenu）
+    // 菜单模板：刷新/全屏/开发者工具/退出，导航操作作用于当前活跃 tab
     const menuSetup = menuBar ? `
-    // 菜单固定显示，含上一步/下一步 + Alt+Left/Right 快捷键
     const template = [
         {
             label: '文件',
@@ -1002,20 +1001,20 @@ function renderWebAppMainJs(config) {
         {
             label: '历史',
             submenu: [
-                { label: '上一步', accelerator: 'Alt+Left', click: () => { if (win.webContents.navigationHistory.canGoBack()) win.webContents.navigationHistory.goBack(); } },
-                { label: '下一步', accelerator: 'Alt+Right', click: () => { if (win.webContents.navigationHistory.canGoForward()) win.webContents.navigationHistory.goForward(); } }
+                { label: '上一步', accelerator: 'Alt+Left', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t && t.view.webContents.navigationHistory.canGoBack()) t.view.webContents.navigationHistory.goBack(); } },
+                { label: '下一步', accelerator: 'Alt+Right', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t && t.view.webContents.navigationHistory.canGoForward()) t.view.webContents.navigationHistory.goForward(); } }
             ]
         },
         {
             label: '视图',
             submenu: [
-                { label: '重置缩放', accelerator: 'Ctrl+0', click: () => { win.webContents.setZoomFactor(1.0); } },
+                { label: '重置缩放', accelerator: 'Ctrl+0', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t) t.view.webContents.setZoomFactor(1.0); } },
                 { label: '放大', accelerator: 'Control+=', click: () => { adjustZoom(0.1); } },
                 { label: '缩小', accelerator: 'Control+-', click: () => { adjustZoom(-0.1); } },
                 { type: 'separator' },
                 { role: 'togglefullscreen', label: '全屏' },
                 { type: 'separator' },
-                { label: '开发者工具', accelerator: 'F12', click: () => { win.webContents.toggleDevTools(); } }
+                { label: '开发者工具', accelerator: 'F12', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t) t.view.webContents.toggleDevTools(); } }
             ]
         },
         {
@@ -1027,85 +1026,209 @@ function renderWebAppMainJs(config) {
     ];
     const menu = Menu.buildFromTemplate(template);
     Menu.setApplicationMenu(menu);` : `
-    // 菜单栏禁用：彻底不显示菜单
     Menu.setApplicationMenu(null);`;
 
-    // 通用键盘快捷键监听（菜单显示/隐藏均生效，避免菜单关闭后快捷键失灵）
-    const shortcutSetup = `
-    // 缩放/重置/DevTools 快捷键：通过 before-input-event 在主进程拦截，菜单关闭时也生效
-    let _zoom = 1.0;
-    function adjustZoom(delta) {
-        _zoom = Math.max(0.5, Math.min(2.5, Math.round((_zoom + delta) * 10) / 10));
-        win.webContents.setZoomFactor(_zoom);
-    }
-    win.webContents.on('before-input-event', (e, input) => {
-        if (input.type !== 'keyDown') return;
-        const ctrl = input.control;
-        const code = input.code;
-        if (ctrl && code === 'Equal') { adjustZoom(0.1); e.preventDefault(); }
-        else if (ctrl && code === 'Minus') { adjustZoom(-0.1); e.preventDefault(); }
-        else if (ctrl && (code === 'Digit0' || code === 'Numpad0')) { _zoom = 1.0; win.webContents.setZoomFactor(1.0); e.preventDefault(); }
-        else if (code === 'F12') { win.webContents.toggleDevTools(); e.preventDefault(); }
-    });`;
-
-    return `// 自动生成的 Canbox 网页应用 main.js
+    return `// 自动生成的 Canbox 网页应用 main.js（多标签页架构）
 // 由 canbox-manager web-app-creator 生成
-const { app, BrowserWindow, Menu, screen, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, screen, ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
 // 设置 AppUserModelID（必须在 app.whenReady() 之前）
-// Windows 任务栏按此 ID 分组窗口，与其他 Canbox APP/manager 分开显示
 app.setAppUserModelId('com.canbox.web.${appId}');
 
-// Chrome UA 伪装（避免网站识别为非标准浏览器而限制功能）
+// Chrome UA 伪装
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
-// 窗口状态文件（存于本应用独立 userData 目录）
+const TAB_BAR_HEIGHT = 35;
+const tabs = [];
+let tabIdSeq = 0;
+let activeTabId = null;
+let rendererReady = false;
+
+// 窗口状态文件
 const stateFile = path.join(app.getPath('userData'), 'window-state.json');
 
-// 读取上次窗口状态
 function loadWindowState() {
-    try {
-        const raw = fs.readFileSync(stateFile, 'utf8');
-        return JSON.parse(raw);
-    } catch (e) {
-        return null;
-    }
+    try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (e) { return null; }
 }
 
-// 保存窗口状态到文件
 function saveWindowState() {
     if (!win || win.isDestroyed()) return;
     const isMaximized = win.isMaximized();
     const isFullScreen = win.isFullScreen();
     const bounds = (isMaximized || isFullScreen) ? null : win.getBounds();
-    const state = {
-        bounds,
-        isMaximized,
-        isFullScreen
-    };
     try {
-        fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
-    } catch (e) {
-        // 忽略写入失败
-    }
+        fs.writeFileSync(stateFile, JSON.stringify({ bounds, isMaximized, isFullScreen }, null, 2));
+    } catch (e) {}
 }
 
-// 校验 bounds 是否在某个显示器可视范围内
 function isBoundsVisible(bounds) {
     if (!bounds) return false;
     const display = screen.getDisplayMatching(bounds);
     const area = display.workArea;
-    return bounds.x + bounds.width > area.x &&
-           bounds.x < area.x + area.width &&
-           bounds.y + bounds.height > area.y &&
-           bounds.y < area.y + area.height;
+    return bounds.x + bounds.width > area.x && bounds.x < area.x + area.width &&
+           bounds.y + bounds.height > area.y && bounds.y < area.y + area.height;
 }
 
 const savedState = loadWindowState();
-
 let win;
+
+function sendTabs() {
+    if (!win || !rendererReady) return;
+    win.webContents.send('tabs:update', tabs.map((t, i) => ({
+        id: t.id, title: t.title, url: t.url,
+        active: t.id === activeTabId, pinned: t.pinned, index: i
+    })));
+}
+
+function bringToFront(view) {
+    win.contentView.removeChildView(view);
+    win.contentView.addChildView(view);
+}
+
+function layoutViews() {
+    if (!win) return;
+    const [w, h] = win.getContentSize();
+    const showTabBar = tabs.length > 1;
+    const contentY = showTabBar ? TAB_BAR_HEIGHT : 0;
+    const contentH = h - contentY;
+    win.webContents.send('tabbar:visibility', showTabBar);
+    for (const t of tabs) {
+        if (t.id === activeTabId) {
+            t.view.setBounds({ x: 0, y: contentY, width: w, height: contentH });
+            bringToFront(t.view);
+        } else {
+            t.view.setBounds({ x: -99999, y: -99999, width: 100, height: 100 });
+        }
+    }
+}
+
+function activeIndex() { return tabs.findIndex(t => t.id === activeTabId); }
+
+function createTab(url, activate = true, pinned = false) {
+    const id = ++tabIdSeq;
+    const view = new WebContentsView({
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    view.webContents.setUserAgent(CHROME_UA);
+
+    // 拦截新窗口：改为在 APP 内新开 tab
+    view.webContents.setWindowOpenHandler(({ url: newUrl }) => {
+        createTab(newUrl, true, false);
+        return { action: 'deny' };
+    });
+
+    view.webContents.on('page-title-updated', (_e, title) => {
+        const t = tabs.find(x => x.id === id);
+        if (t) { t.title = title || t.url; sendTabs(); }
+    });
+    view.webContents.on('did-navigate', (_e, navUrl) => {
+        const t = tabs.find(x => x.id === id);
+        if (t) { t.url = navUrl; sendTabs(); }
+    });
+
+    view.webContents.loadURL(url);
+    win.contentView.addChildView(view);
+    tabs.push({ id, title: url, url, view, pinned });
+
+    // 每个 WebContentsView 都监听快捷键（焦点在页面内时事件不经过主窗口）
+    view.webContents.on('before-input-event', (e, input) => handleShortcut(e, input));
+
+    if (activate) { activeTabId = id; layoutViews(); }
+    sendTabs();
+    return id;
+}
+
+function switchTab(id) {
+    if (!tabs.find(t => t.id === id)) return;
+    activeTabId = id;
+    layoutViews();
+    sendTabs();
+}
+
+function closeTab(id) {
+    const t = tabs.find(x => x.id === id);
+    if (!t || t.pinned) return false;
+    const idx = tabs.indexOf(t);
+    tabs.splice(idx, 1);
+    win.contentView.removeChildView(t.view);
+    t.view.webContents.destroy();
+    if (activeTabId === id) {
+        activeTabId = tabs.length > 0 ? tabs[Math.min(idx, tabs.length - 1)].id : null;
+    }
+    layoutViews();
+    sendTabs();
+    return true;
+}
+
+function switchAdjacent(delta) {
+    const idx = activeIndex();
+    if (idx < 0) return;
+    const next = (idx + delta + tabs.length) % tabs.length;
+    switchTab(tabs[next].id);
+}
+
+function moveActiveTab(delta) {
+    const idx = activeIndex();
+    if (idx < 0) return;
+    const t = tabs[idx];
+    if (t.pinned) return;
+    const target = idx + delta;
+    if (target <= 0 || target >= tabs.length) return;
+    tabs[idx] = tabs[target];
+    tabs[target] = t;
+    sendTabs();
+    layoutViews();
+}
+
+// 缩放（作用于当前活跃 tab）
+let _zoom = 1.0;
+function adjustZoom(delta) {
+    const t = tabs.find(x => x.id === activeTabId);
+    if (!t) return;
+    _zoom = Math.max(0.5, Math.min(2.5, Math.round((_zoom + delta) * 10) / 10));
+    t.view.webContents.setZoomFactor(_zoom);
+}
+
+// 统一快捷键处理
+function handleShortcut(e, input) {
+    if (input.type !== 'keyDown') return;
+    const ctrl = input.control;
+    const shift = input.shift;
+    const alt = input.alt;
+    const code = input.code;
+
+    if (ctrl && !shift && !alt && code === 'KeyW') { e.preventDefault(); closeTab(activeTabId); return; }
+    if (ctrl && !shift && !alt && code === 'KeyQ') { e.preventDefault(); win.close(); return; }
+    if (ctrl && !shift && code === 'Tab') { e.preventDefault(); switchAdjacent(1); return; }
+    if (ctrl && !shift && code === 'PageDown') { e.preventDefault(); switchAdjacent(1); return; }
+    if (ctrl && shift && code === 'Tab') { e.preventDefault(); switchAdjacent(-1); return; }
+    if (ctrl && !shift && code === 'PageUp') { e.preventDefault(); switchAdjacent(-1); return; }
+    if (ctrl && shift && code === 'PageDown') { e.preventDefault(); moveActiveTab(1); return; }
+    if (ctrl && shift && code === 'PageUp') { e.preventDefault(); moveActiveTab(-1); return; }
+    // 缩放
+    if (ctrl && code === 'Equal') { adjustZoom(0.1); e.preventDefault(); return; }
+    if (ctrl && code === 'Minus') { adjustZoom(-0.1); e.preventDefault(); return; }
+    if (ctrl && (code === 'Digit0' || code === 'Numpad0')) {
+        const t = tabs.find(x => x.id === activeTabId);
+        if (t) t.view.webContents.setZoomFactor(1.0);
+        e.preventDefault(); return;
+    }
+    if (code === 'F12') {
+        const t = tabs.find(x => x.id === activeTabId);
+        if (t) t.view.webContents.toggleDevTools();
+        e.preventDefault(); return;
+    }
+}
+
+ipcMain.handle('tab:get', () => tabs.map((t, i) => ({
+    id: t.id, title: t.title, url: t.url,
+    active: t.id === activeTabId, pinned: t.pinned, index: i
+})));
+ipcMain.handle('tab:switch', (_e, id) => switchTab(id));
+ipcMain.handle('tab:close', (_e, id) => closeTab(id));
+
 app.whenReady().then(() => {
     const useSavedBounds = savedState && savedState.bounds && isBoundsVisible(savedState.bounds);
     const windowOptions = {
@@ -1113,16 +1236,15 @@ app.whenReady().then(() => {
         title: '${name}',
         autoHideMenuBar: false,
         webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
             contextIsolation: true
         }
     };
     if (useSavedBounds) {
         Object.assign(windowOptions, {
-            x: savedState.bounds.x,
-            y: savedState.bounds.y,
-            width: savedState.bounds.width,
-            height: savedState.bounds.height
+            x: savedState.bounds.x, y: savedState.bounds.y,
+            width: savedState.bounds.width, height: savedState.bounds.height
         });
     } else {
         windowOptions.width = ${width};
@@ -1132,28 +1254,17 @@ app.whenReady().then(() => {
     if (savedState && savedState.isMaximized) win.maximize();
     if (savedState && savedState.isFullScreen) win.setFullScreen(true);
 
-    win.webContents.setUserAgent(CHROME_UA);
+    win.webContents.on('before-input-event', (e, input) => handleShortcut(e, input));
+    win.loadFile(path.join(__dirname, 'tabbar.html'));
+    win.on('resize', layoutViews);
 
-    // 拦截新窗口打开：http/https 链接交由系统默认浏览器，禁止应用内新开 BrowserWindow
-    win.webContents.setWindowOpenHandler(({ url }) => {
-        if (url.startsWith('http://') || url.startsWith('https://')) {
-            shell.openExternal(url);
-        }
-        return { action: 'deny' };
+    win.webContents.once('did-finish-load', () => {
+        rendererReady = true;
+        // 第一个 tab 是主页，pinned 不可关闭
+        createTab('${url}', true, true);
     });
-
-    // 拦截主窗口内的整页跳转（例如 README 中未被渲染层拦截的普通链接），
-    // 交由系统默认浏览器打开，避免 manager 主界面被外链覆盖。
-    win.webContents.on('will-navigate', (event, url) => {
-        if (url.startsWith('http://') || url.startsWith('https://')) {
-            event.preventDefault();
-            shell.openExternal(url);
-        }
-    });
-
-    win.loadURL('${url}');${shortcutSetup}${menuSetup}
-
-    // 监听窗口变化，debounce 保存
+${menuSetup}
+    // 窗口状态保存
     let saveTimer = null;
     const scheduleSave = () => {
         if (saveTimer) clearTimeout(saveTimer);
@@ -1165,13 +1276,143 @@ app.whenReady().then(() => {
     win.on('unmaximize', scheduleSave);
     win.on('enter-full-screen', scheduleSave);
     win.on('leave-full-screen', scheduleSave);
-
-    // 退出前强制保存
     win.on('close', saveWindowState);
 });
 
-app.on('window-all-closed', () => {
-    app.quit();
+app.on('window-all-closed', () => app.quit());
+`;
+}
+
+/**
+ * 渲染生成的 tabbar.html（editbox 风格标签栏）
+ */
+function renderWebAppTabbarHtml() {
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f0f2f5; color: #606266; user-select: none;
+  }
+  .tab-bar {
+    display: flex; align-items: flex-end;
+    height: 35px; padding: 0 8px; gap: 2px;
+    background: #e4e7ed;
+    overflow: hidden;
+  }
+  .tab-bar.hidden { display: none; }
+  .tab {
+    display: flex; align-items: center; gap: 8px;
+    min-width: 110px; max-width: 220px; height: 28px;
+    padding: 0 16px; margin-bottom: -1px;
+    background: #f0f2f5;
+    border: 1px solid #e4e7ed;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    font-size: 14px; font-weight: 600; color: #909399;
+    position: relative;
+    transition: background 0.12s, color 0.12s;
+  }
+  .tab:hover { color: #303133; }
+  .tab.active {
+    background: #ffffff;
+    color: #303133;
+    border-color: #dcdfe6;
+    height: 29px;
+  }
+  .tab.active::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: #409eff;
+    border-radius: 4px 4px 0 0;
+  }
+  .tab-title {
+    flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tab-close {
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: none; background: transparent;
+    color: #909399; font-size: 12px; line-height: 1;
+    cursor: pointer; border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transform: scale(0.85);
+    transition: opacity 0.12s, transform 0.12s, background 0.12s;
+  }
+  .tab:hover .tab-close, .tab.active .tab-close {
+    opacity: 1; pointer-events: auto; transform: scale(1);
+  }
+  .tab-close:hover { background: #e4e7ed; color: #303133; }
+  .tab.pinned .tab-close { display: none; }
+  .pinned-dot {
+    width: 6px; height: 6px; flex-shrink: 0;
+    background: #409eff; border-radius: 50%;
+  }
+  .content-placeholder {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: #c0c4cc; font-size: 13px;
+  }
+</style>
+</head>
+<body>
+  <div class="tab-bar hidden" id="tabBar"></div>
+  <div class="content-placeholder" id="placeholder">内容区</div>
+<script>
+  let tabList = [];
+  const tabBar = document.getElementById('tabBar');
+  const placeholder = document.getElementById('placeholder');
+
+  function renderTabs() {
+    tabBar.querySelectorAll('.tab').forEach(el => el.remove());
+    tabList.forEach(t => {
+      const el = document.createElement('div');
+      el.className = 'tab' + (t.active ? ' active' : '') + (t.pinned ? ' pinned' : '');
+      const dot = t.pinned ? '<span class="pinned-dot"></span>' : '';
+      const closeBtn = t.pinned ? '' : '<button class="tab-close">×</button>';
+      el.innerHTML = dot + '<span class="tab-title"></span>' + closeBtn;
+      el.querySelector('.tab-title').textContent = t.title || t.url;
+      el.addEventListener('click', (e) => {
+        if (e.target.classList.contains('tab-close')) return;
+        window.tabs.switch(t.id);
+      });
+      const close = el.querySelector('.tab-close');
+      if (close) {
+        close.addEventListener('click', (e) => { e.stopPropagation(); window.tabs.close(t.id); });
+      }
+      tabBar.appendChild(el);
+    });
+    tabBar.classList.toggle('hidden', tabList.length <= 1);
+    placeholder.style.display = tabList.length ? 'none' : 'flex';
+  }
+
+  if (window.tabs) {
+    window.tabs.onUpdate((list) => { tabList = list; renderTabs(); });
+    window.tabs.get().then((list) => { tabList = list; renderTabs(); }).catch(() => {});
+  }
+</script>
+</body>
+</html>
+`;
+}
+
+/**
+ * 渲染生成的 preload.js（tab 栏窗口的 preload）
+ */
+function renderWebAppPreload() {
+    return `const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('tabs', {
+    get: () => ipcRenderer.invoke('tab:get'),
+    switch: (id) => ipcRenderer.invoke('tab:switch', id),
+    close: (id) => ipcRenderer.invoke('tab:close', id),
+    onUpdate: (cb) => ipcRenderer.on('tabs:update', (_e, tabs) => cb(tabs))
 });
 `;
 }
@@ -1246,6 +1487,12 @@ async function createWebApp(config) {
             bgColor: config.bgColor
         });
         fs.writeFileSync(path.join(destPath, 'main.js'), mainJsContent, 'utf-8');
+
+        // 写 tabbar.html（标签栏 UI）
+        fs.writeFileSync(path.join(destPath, 'tabbar.html'), renderWebAppTabbarHtml(), 'utf-8');
+
+        // 写 preload.js（标签栏窗口的 preload）
+        fs.writeFileSync(path.join(destPath, 'preload.js'), renderWebAppPreload(), 'utf-8');
 
         // 写 logo.png（base64 → 二进制）
         if (config.logo && config.logo.startsWith('data:image/')) {
@@ -1339,6 +1586,10 @@ async function editWebApp(appId, config) {
             bgColor: config.bgColor
         });
         fs.writeFileSync(path.join(destPath, 'main.js'), mainJsContent, 'utf-8');
+
+        // 覆盖写 tabbar.html + preload.js
+        fs.writeFileSync(path.join(destPath, 'tabbar.html'), renderWebAppTabbarHtml(), 'utf-8');
+        fs.writeFileSync(path.join(destPath, 'preload.js'), renderWebAppPreload(), 'utf-8');
 
         // 覆盖写 logo.png（如提供）
         if (config.logo && config.logo.startsWith('data:image/')) {
