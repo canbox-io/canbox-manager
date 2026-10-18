@@ -20,11 +20,13 @@ console.time('[startup] main.js 模块加载到 window-ready 总耗时');
 
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, protocol } = require('electron');
 const path = require('path');
+const os = require('os');
 const { spawn } = require('child_process');
 const fs = require('fs');
 // 第三方依赖必须在顶部 require：importAppFromZip 中会设置 process.noAsar=true，
 // 若在其后才 require（如 adm-zip/nanoid），会因 asar 补丁被禁用而无法从 app.asar 加载。
 const AdmZip = require('adm-zip');
+const asar = require('@electron/asar');
 const { customAlphabet } = require('nanoid');
 
 // 自动禁用 sandbox（某些 Linux 环境下 sandbox 无法工作）
@@ -1432,6 +1434,110 @@ function renderWebAppPackageJson(config) {
 }
 
 /**
+ * 渲染网页应用源码到临时 staging 目录（app.asar 的打包输入）
+ * @param {string} appId APP 标识
+ * @param {Object} config 网页应用配置
+ * @returns {{ stagingDir: string, pkgContent: string }}
+ */
+function buildWebAppSources(appId, config) {
+    const stagingDir = path.join(os.tmpdir(), `canbox-webapp-${appId}-${Date.now()}`);
+    fs.mkdirSync(stagingDir, { recursive: true });
+
+    // package.json：APP 作为独立 Electron 应用的标准元数据
+    // 必须位于 app.asar 内，Electron 据此解析入口（main 字段）
+    const pkgContent = renderWebAppPackageJson({
+        appId,
+        url: config.url,
+        name: config.name,
+        isPwa: config.isPwa,
+        manifestUrl: config.manifestUrl,
+        themeColor: config.themeColor,
+        bgColor: config.bgColor,
+        menuBar: config.menuBar,
+        width: config.width,
+        height: config.height
+    });
+    fs.writeFileSync(path.join(stagingDir, 'package.json'), pkgContent, 'utf-8');
+
+    // main.js
+    const mainJsContent = renderWebAppMainJs({
+        appId,
+        url: config.url,
+        name: config.name,
+        width: config.width,
+        height: config.height,
+        menuBar: config.menuBar,
+        bgColor: config.bgColor
+    });
+    fs.writeFileSync(path.join(stagingDir, 'main.js'), mainJsContent, 'utf-8');
+
+    // tabbar.html（标签栏 UI）
+    fs.writeFileSync(path.join(stagingDir, 'tabbar.html'), renderWebAppTabbarHtml(), 'utf-8');
+
+    // preload.js（标签栏窗口的 preload）
+    fs.writeFileSync(path.join(stagingDir, 'preload.js'), renderWebAppPreload(), 'utf-8');
+
+    return { stagingDir, pkgContent };
+}
+
+/**
+ * 清理 staging 目录
+ * @param {string|null} stagingDir
+ */
+function cleanupStaging(stagingDir) {
+    if (!stagingDir) return;
+    try {
+        const originalFs = require('original-fs');
+        if (originalFs.existsSync(stagingDir)) {
+            originalFs.rmSync(stagingDir, { recursive: true, force: true });
+        }
+    } catch (e) {}
+}
+
+/**
+ * 将网页应用源码目录打包为 app.asar，使磁盘存储结构与普通 APP 一致
+ *
+ * createPackage 读写的是真实路径，需临时关闭 Electron asar 补丁，
+ * 避免 fs 补丁把路径中的 .asar 当成目录处理
+ * @param {string} srcDir 源码目录
+ * @param {string} outAsarPath 产出的 app.asar 路径
+ */
+async function packAppAsar(srcDir, outAsarPath) {
+    const prevNoAsar = process.noAsar;
+    process.noAsar = true;
+    try {
+        const originalFs = require('original-fs');
+        if (originalFs.existsSync(outAsarPath)) {
+            originalFs.rmSync(outAsarPath, { force: true });
+        }
+        await asar.createPackage(srcDir, outAsarPath);
+    } finally {
+        process.noAsar = prevNoAsar;
+    }
+}
+
+/**
+ * 写入 app.asar 之外的 APP 元数据与图标（package.json / .canbox-app / logo.png）
+ * 这三项由原生 fs 直接读取，不能放进 asar
+ * @param {string} destPath APP 目录
+ * @param {string} pkgContent package.json 内容
+ * @param {Object} webAppConfig 网页应用配置
+ * @param {string} electronRange electron 版本范围
+ * @param {string} [logoBase64] logo 的 base64 data URI
+ */
+function writeWebAppOuterFiles(destPath, pkgContent, webAppConfig, electronRange, logoBase64) {
+    fs.writeFileSync(path.join(destPath, 'package.json'), pkgContent, 'utf-8');
+    writeCanboxMeta(destPath, createWebMeta(electronRange, webAppConfig));
+
+    if (logoBase64 && logoBase64.startsWith('data:image/')) {
+        const base64Data = logoBase64.split(',')[1];
+        if (base64Data) {
+            fs.writeFileSync(path.join(destPath, 'logo.png'), Buffer.from(base64Data, 'base64'));
+        }
+    }
+}
+
+/**
  * 创建网页应用
  * @param {Object} config { url, name, logo(base64 data URI), width, height, menuBar, isPwa, manifestUrl, themeColor, bgColor }
  */
@@ -1442,26 +1548,14 @@ async function createWebApp(config) {
 
     const appId = generateAppId();
     const destPath = path.join(USERS_PATH, 'apps', appId);
+    let stagingDir = null;
 
     try {
-        fs.mkdirSync(destPath, { recursive: true });
+        // 源码渲染到临时 staging 目录，再打包为 app.asar
+        const built = buildWebAppSources(appId, config);
+        stagingDir = built.stagingDir;
 
-        // 写 package.json
-        const pkgContent = renderWebAppPackageJson({
-            appId,
-            url: config.url,
-            name: config.name,
-            isPwa: config.isPwa,
-            manifestUrl: config.manifestUrl,
-            themeColor: config.themeColor,
-            bgColor: config.bgColor,
-            menuBar: config.menuBar,
-            width: config.width,
-            height: config.height
-        });
-        fs.writeFileSync(path.join(destPath, 'package.json'), pkgContent, 'utf-8');
-
-        // 写 .canbox-app（canbox 平台配置，与 package.json 分离）
+        // .canbox-app（canbox 平台配置，与 package.json 分离）
         // web app 使用当前 manager 的 electron 精确版本（builtin），去掉 ^ 避免范围漂移到未在白名单中的版本
         const electronRange = process.versions.electron;
         const webAppConfig = {
@@ -1474,33 +1568,10 @@ async function createWebApp(config) {
             width: config.width || 1280,
             height: config.height || 800
         };
-        writeCanboxMeta(destPath, createWebMeta(electronRange, webAppConfig));
 
-        // 写 main.js
-        const mainJsContent = renderWebAppMainJs({
-            appId,
-            url: config.url,
-            name: config.name,
-            width: config.width,
-            height: config.height,
-            menuBar: config.menuBar,
-            bgColor: config.bgColor
-        });
-        fs.writeFileSync(path.join(destPath, 'main.js'), mainJsContent, 'utf-8');
-
-        // 写 tabbar.html（标签栏 UI）
-        fs.writeFileSync(path.join(destPath, 'tabbar.html'), renderWebAppTabbarHtml(), 'utf-8');
-
-        // 写 preload.js（标签栏窗口的 preload）
-        fs.writeFileSync(path.join(destPath, 'preload.js'), renderWebAppPreload(), 'utf-8');
-
-        // 写 logo.png（base64 → 二进制）
-        if (config.logo && config.logo.startsWith('data:image/')) {
-            const base64Data = config.logo.split(',')[1];
-            if (base64Data) {
-                fs.writeFileSync(path.join(destPath, 'logo.png'), Buffer.from(base64Data, 'base64'));
-            }
-        }
+        fs.mkdirSync(destPath, { recursive: true });
+        await packAppAsar(stagingDir, path.join(destPath, 'app.asar'));
+        writeWebAppOuterFiles(destPath, built.pkgContent, webAppConfig, electronRange, config.logo);
 
         // 生成 launcher（与普通 APP 导入一致）
         const appInfo = readAppInfo(appId);
@@ -1517,6 +1588,8 @@ async function createWebApp(config) {
             }
         } catch (cleanupErr) {}
         return { success: false, error: e.message };
+    } finally {
+        cleanupStaging(stagingDir);
     }
 }
 
@@ -1545,24 +1618,14 @@ async function editWebApp(appId, config) {
         return { success: false, error: 'Only web app can be edited' };
     }
     const oldPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    let stagingDir = null;
 
     try {
-        // 覆盖写 package.json
-        const pkgContent = renderWebAppPackageJson({
-            appId,
-            url: config.url,
-            name: config.name,
-            isPwa: config.isPwa,
-            manifestUrl: config.manifestUrl,
-            themeColor: config.themeColor,
-            bgColor: config.bgColor,
-            menuBar: config.menuBar,
-            width: config.width,
-            height: config.height
-        });
-        fs.writeFileSync(pkgPath, pkgContent, 'utf-8');
+        // 源码渲染到临时 staging 目录，再重新打包为 app.asar（覆盖旧归档）
+        const built = buildWebAppSources(appId, config);
+        stagingDir = built.stagingDir;
 
-        // 覆盖写 .canbox-app（保留原 electron range）
+        // .canbox-app（保留原 electron range）
         const webAppConfig = {
             url: config.url,
             isPwa: !!config.isPwa,
@@ -1573,29 +1636,15 @@ async function editWebApp(appId, config) {
             width: config.width || 1280,
             height: config.height || 800
         };
-        writeCanboxMeta(destPath, createWebMeta(oldMeta.electron.range, webAppConfig));
+        await packAppAsar(stagingDir, path.join(destPath, 'app.asar'));
+        writeWebAppOuterFiles(destPath, built.pkgContent, webAppConfig, oldMeta.electron.range, config.logo);
 
-        // 覆盖写 main.js
-        const mainJsContent = renderWebAppMainJs({
-            appId,
-            url: config.url,
-            name: config.name,
-            width: config.width,
-            height: config.height,
-            menuBar: config.menuBar,
-            bgColor: config.bgColor
-        });
-        fs.writeFileSync(path.join(destPath, 'main.js'), mainJsContent, 'utf-8');
-
-        // 覆盖写 tabbar.html + preload.js
-        fs.writeFileSync(path.join(destPath, 'tabbar.html'), renderWebAppTabbarHtml(), 'utf-8');
-        fs.writeFileSync(path.join(destPath, 'preload.js'), renderWebAppPreload(), 'utf-8');
-
-        // 覆盖写 logo.png（如提供）
-        if (config.logo && config.logo.startsWith('data:image/')) {
-            const base64Data = config.logo.split(',')[1];
-            if (base64Data) {
-                fs.writeFileSync(path.join(destPath, 'logo.png'), Buffer.from(base64Data, 'base64'));
+        // 清理旧实现遗留的散落源码文件（旧版本直接写在 apps/{appId}/ 根目录，现已收进 app.asar）
+        const originalFs = require('original-fs');
+        for (const name of ['main.js', 'tabbar.html', 'preload.js']) {
+            const loosePath = path.join(destPath, name);
+            if (originalFs.existsSync(loosePath)) {
+                originalFs.rmSync(loosePath, { force: true });
             }
         }
 
@@ -1610,6 +1659,8 @@ async function editWebApp(appId, config) {
         return { success: true, appId };
     } catch (e) {
         return { success: false, error: e.message };
+    } finally {
+        cleanupStaging(stagingDir);
     }
 }
 

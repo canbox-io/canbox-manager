@@ -13,7 +13,7 @@ const srcModules = path.resolve(process.argv[2]);
 const destModules = path.resolve(process.argv[3]);
 
 // 主进程运行时需要的根依赖
-const runtimeDeps = ['adm-zip', 'nanoid', 'axios'];
+const runtimeDeps = ['@electron/asar', 'adm-zip', 'nanoid', 'axios'];
 
 const visited = new Set();
 

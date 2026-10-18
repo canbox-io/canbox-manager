@@ -42,7 +42,7 @@ electron -r canbox-core/injection.js canbox-manager/ --app-id=canbox-manager --n
 1. 用户输入网址 → 自动补全 `https://` 前缀
 2. 点击"自动抓取" → 后端 fetch 网页 HTML → 解析 `<link rel="manifest">` → fetch manifest.json → 选最大尺寸 PNG 图标 → 预填名称/图标/主题色
 3. 用户可调整名称、窗口宽高、是否显示菜单栏
-4. 提交后生成 `apps/{appId}/` 目录，含 `package.json` / `main.js` / `logo.png`
+4. 提交后生成 `apps/{appId}/` 目录：源码（`main.js` / `tabbar.html` / `preload.js` / `package.json`）打包为 `app.asar`，外部保留 `package.json` / `.canbox-app` / `logo.png`，与普通 APP 存储结构一致
 5. 同时生成系统 launcher（与普通 APP 一致）
 
 **应用类型自描述**（`package.json` 扩展字段）：
@@ -83,7 +83,7 @@ electron -r canbox-core/injection.js canbox-manager/ --app-id=canbox-manager --n
 **启动方式**：
 ```bash
 # 网页应用：不注入 canbox-core，使用独立 userData 路径
-electron apps/{appId}/ --no-sandbox
+electron apps/{appId}/app.asar --no-sandbox
 
 # 普通 APP：注入 canbox-core，共享平台 userData
 electron -r canbox-core/injection.js apps/{appId}/app.asar --app-id={appId} --no-sandbox
@@ -91,7 +91,7 @@ electron -r canbox-core/injection.js apps/{appId}/app.asar --app-id={appId} --no
 
 网页应用使用独立的默认 userData 路径（`~/.config/<package.json name>/`），避免与 `~/.config/canbox/` 共享 Chromium 数据导致的污染和初始化延迟。
 
-**编辑**：仅 `canbox.type === 'web'` 的应用可编辑，可修改名称、网址、图标、窗口尺寸、菜单栏开关；保存后重新生成 `main.js` / `package.json` / `logo.png` 并强制更新 launcher。
+**编辑**：仅 `canbox.type === 'web'` 的应用可编辑，可修改名称、网址、图标、窗口尺寸、菜单栏开关；保存后重新生成源码并重新打包 `app.asar`（同时清理旧格式残留的散落源码文件），外部重写 `package.json` / `.canbox-app` / `logo.png` 并强制更新 launcher。
 
 ### 3. 仓库管理
 
