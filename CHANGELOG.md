@@ -4,6 +4,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.3] - 2026-10-18
+
+### feat | 新功能 / Features
+
+网页应用改为多标签页架构：使用 Electron WebContentsView 承载多页面，自动拦截页面 target=_blank / window.open 链接在应用内新建标签页，无需手动新建入口
+标签栏采用独立一行并保留系统原生标题栏；主页标签固定不可关闭，仅当标签数大于 1 时显示标签栏，单标签时自动隐藏以最大化内容区
+新增标签切换与关闭的键盘操作，窗口大小/位置自动记忆恢复；补全导航（Alt+←/→）、缩放（Ctrl+滚轮、Ctrl+=/-、Ctrl+0）与开发者工具（F12）等菜单项
+网页应用源码统一打包为 app.asar，磁盘存储结构与普通 APP 一致（外部仅保留 package.json、.canbox-app 与 logo.png）；编辑保存时重新打包并清理旧格式残留的散落源码文件
+引入 @electron/asar 作为运行时依赖，并纳入 Linux/Windows 构建脚本的运行时依赖复制清单
+
+Web apps now use a multi-tab architecture: pages are hosted in Electron WebContentsView, and target=_blank / window.open links are intercepted to open tabs inside the app, with no manual "new tab" entry
+The tab bar occupies its own row while keeping the native title bar; the home tab is pinned and unclosable, the bar only appears when more than one tab exists, and auto-hides with a single tab to maximize the content area
+Add keyboard support for switching and closing tabs plus window bounds persistence; complete menu items for navigation (Alt+←/→), zoom (Ctrl+wheel, Ctrl+=/-, Ctrl+0) and DevTools (F12)
+Web app sources are now packed into app.asar so on-disk storage matches regular APPs (only package.json, .canbox-app and logo.png stay outside); editing regenerates the archive and cleans up leftover loose source files from the legacy layout
+Introduce @electron/asar as a runtime dependency and add it to the runtime dependency copy list of the Linux/Windows build scripts
+
 ## [0.3.2] - 2026-10-17
 
 ### feat | 新功能 / Features
