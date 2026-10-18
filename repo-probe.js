@@ -5,6 +5,9 @@
  * 不 clone 整个仓库。支持 GitHub / Gitee / GitLab 及兼容平台。
  *
  * Release 下载通过平台 API 获取资产 URL，确保 GitHub / Gitee 都能正确下载。
+ *
+ * 国内网络兜底：凡 github.com / raw.githubusercontent.com / api.github.com 的请求，
+ * 均「直连优先 + 第三方镜像兜底」，直连可达时不触发镜像，对用户与开发者透明。
  */
 
 const axios = require('axios');
@@ -34,12 +37,129 @@ const logger = {
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/0.1.0';
 const TIMEOUT = 15000;
 
-// GitHub 代理列表（仅用于加速 github.com 下载，每次下载前并发测速选最优）
+// GitHub 第三方镜像列表（国内直连 GitHub 被墙时的兜底线路，对用户透明）
 const GITHUB_MIRRORS = [
     { name: 'ghfast', url: 'https://ghfast.top' },
     { name: 'ghproxy-net', url: 'https://ghproxy.net' },
     { name: 'gh-proxy', url: 'https://gh-proxy.com' }
 ];
+
+// 需要镜像兜底的 GitHub 域名（raw / api 域名国内常被墙，github.com 又会被 302 回 raw 域名）
+const GITHUB_MIRROR_HOSTS = new Set([
+    'github.com',
+    'www.github.com',
+    'api.github.com',
+    'raw.githubusercontent.com'
+]);
+
+/**
+ * 构建某 URL 的候选线路：直连优先；GitHub 域名追加镜像兜底。
+ * 直连可达时不会触发镜像，全程对用户透明。
+ * @param {string} url
+ * @returns {Array<{name:string,url:string}>}
+ */
+function buildUrlCandidates(url) {
+    const list = [{ name: 'direct', url }];
+    try {
+        const u = new URL(url);
+        if (GITHUB_MIRROR_HOSTS.has(u.hostname)) {
+            for (const m of GITHUB_MIRRORS) {
+                list.push({ name: m.name, url: `${m.url}/${url}` });
+            }
+        }
+    } catch (_) { /* URL 非法，仅直连 */ }
+    return list;
+}
+
+// 最近一次成功的线路名，用于后续请求优先复用，避免每次都先撞直连超时
+let lastGoodRoute = null;
+
+function orderCandidates(candidates, preferred) {
+    if (!preferred) return candidates;
+    const idx = candidates.findIndex(c => c.name === preferred);
+    if (idx <= 0) return candidates;
+    return [candidates[idx], ...candidates.slice(0, idx), ...candidates.slice(idx + 1)];
+}
+
+/**
+ * 归类网络错误：区分超时 / DNS / 连接失败，并回传 HTTP 状态码（若服务端有响应）
+ * @returns {{statusCode:number|null, networkError:string|null}}
+ */
+function classifyNetworkError(e) {
+    let networkError = 'network';
+    if (e.code === 'ECONNABORTED' || (e.message && e.message.includes('timeout'))) {
+        networkError = 'timeout';
+    } else if (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN') {
+        networkError = 'dns';
+    } else if (e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET') {
+        networkError = 'connection';
+    }
+    return {
+        statusCode: (e.response && e.response.status) || null,
+        networkError
+    };
+}
+
+/**
+ * 按候选线路依次请求（直连优先，GitHub 域名镜像兜底）。
+ *
+ * 策略：
+ * - 首个成功响应即返回；成功后记住线路，后续请求优先复用（lastGoodRoute）
+ * - 直连返回 HTTP 错误状态时视为权威结果（文件不存在 / 限流等），立即返回，不再试镜像
+ * - 镜像返回 HTTP 错误状态时继续尝试其它线路（镜像可能不支持该路径）
+ * - 传输层失败（被墙 / 超时 / DNS）时继续尝试下一线路
+ * - 全部失败时：只要出现过传输层错误，就按网络错误上报（比镜像的 404 更贴近真实原因）
+ *
+ * @param {string} url 原始 URL
+ * @param {Object} [opts] 透传给 axios 的配置（timeout / headers / responseType / transformResponse 等）
+ * @returns {Promise<{resp:Object|null, statusCode:number|null, networkError:string|null}>}
+ */
+async function requestWithFallback(url, opts = {}) {
+    const { timeout = TIMEOUT, headers: extraHeaders = {}, ...rest } = opts;
+    const candidates = orderCandidates(buildUrlCandidates(url), lastGoodRoute);
+    let firstHttp = null;   // 镜像返回的 HTTP 错误状态码（非权威，继续试其它线路）
+    let firstNet = null;    // 传输层错误
+
+    for (const cand of candidates) {
+        try {
+            const resp = await axios({
+                method: 'get',
+                ...rest,
+                url: cand.url,
+                timeout,
+                headers: { 'User-Agent': UA, ...extraHeaders }
+            });
+            lastGoodRoute = cand.name;
+            if (cand.name !== 'direct') {
+                logger.info('[repo-probe] request: 经镜像 %s 访问成功 url=%s', cand.name, url);
+            }
+            return { resp, statusCode: resp.status, networkError: null };
+        } catch (e) {
+            if (e.response) {
+                // 直连可达 → 返回的状态码是权威结果，直接返回，无需再试镜像
+                if (cand.name === 'direct') {
+                    logger.info('[repo-probe] request: direct HTTP %s url=%s', e.response.status, url);
+                    return { resp: null, statusCode: e.response.status, networkError: null };
+                }
+                if (!firstHttp) firstHttp = { statusCode: e.response.status };
+                logger.info('[repo-probe] request: mirror %s HTTP %s url=%s', cand.name, e.response.status, url);
+                continue;
+            }
+            const info = classifyNetworkError(e);
+            if (!firstNet) firstNet = info;
+            logger.info('[repo-probe] request error via %s: %s (code=%s, networkError=%s) url=%s',
+                cand.name, e.message, e.code, info.networkError, url);
+        }
+    }
+
+    if (firstNet) {
+        logger.warn('[repo-probe] request: all %d candidates failed (network) url=%s', candidates.length, url);
+        return { resp: null, statusCode: firstNet.statusCode, networkError: firstNet.networkError };
+    }
+    logger.warn('[repo-probe] request: all %d candidates failed (http=%s) url=%s',
+        candidates.length, firstHttp ? firstHttp.statusCode : '?', url);
+    return { resp: null, statusCode: firstHttp ? firstHttp.statusCode : null, networkError: null };
+}
 
 /**
  * 规范化仓库 URL：去除末尾 .git 和多余斜杠
@@ -82,21 +202,20 @@ async function detectDefaultBranch(repoUrl) {
         return 'master';
     }
     const probeUrl = `${info.raw}/info/refs?service=git-upload-pack`;
-    try {
-        const resp = await axios.get(probeUrl, {
-            timeout: 10000,
-            headers: { 'User-Agent': UA },
-            // info/refs 返回 git smart protocol 文本，必须禁用自动 JSON 解析
-            transformResponse: [(data) => data]
-        });
+    const { resp } = await requestWithFallback(probeUrl, {
+        timeout: 10000,
+        // info/refs 返回 git smart protocol 文本，必须禁用自动 JSON 解析
+        transformResponse: [(data) => data]
+    });
+    if (resp) {
         const match = String(resp.data).match(/refs\/heads\/(\S+)/);
         if (match) {
             logger.info('[repo-probe] detectDefaultBranch: detected=%s url=%s', match[1], repoUrl);
             return match[1];
         }
         logger.info('[repo-probe] detectDefaultBranch: no branch match in info/refs, url=%s', probeUrl);
-    } catch (e) {
-        logger.info('[repo-probe] detectDefaultBranch: info/refs failed: %s url=%s', e.message, probeUrl);
+    } else {
+        logger.info('[repo-probe] detectDefaultBranch: info/refs unavailable, url=%s', probeUrl);
     }
     const fallback = info.platform === 'github' ? 'main' : 'master';
     logger.info('[repo-probe] detectDefaultBranch: fallback=%s url=%s', fallback, repoUrl);
@@ -217,17 +336,10 @@ async function getReleaseDownloadUrl(repoUrl, appIdentifier, name, version) {
     logger.info('[repo-probe] getReleaseDownloadUrl: prefixes=%j, version=%s, apiUrls=%j', prefixCandidates, version, apiUrls);
 
     for (const apiUrl of apiUrls) {
-        let data;
-        try {
-            const resp = await axios.get(apiUrl, {
-                timeout: TIMEOUT,
-                headers: { 'User-Agent': UA, 'Accept': 'application/vnd.github+json' }
-            });
-            data = resp.data;
-        } catch (e) {
-            logger.info('[repo-probe] getReleaseDownloadUrl: api error: %s url=%s', e.message, apiUrl);
-            continue;
-        }
+        // 直连优先，GitHub API 域名追加镜像兜底
+        const { data, statusCode, networkError } = await fetchJson(apiUrl, { 'Accept': 'application/vnd.github+json' });
+        logger.info('[repo-probe] getReleaseDownloadUrl: api result status=%s networkError=%s url=%s',
+            statusCode, networkError || '(none)', apiUrl);
 
         // 容错：部分平台（如 gitee）tag 不存在时 API 返回字面量 null，axios 解析后为 JS null
         if (!data || typeof data !== 'object') {
@@ -258,56 +370,52 @@ async function getReleaseDownloadUrl(repoUrl, appIdentifier, name, version) {
  *   成功时 text 为文件内容；失败时 text 为 null，statusCode/networkError 标识失败原因
  */
 async function fetchText(url) {
-    try {
-        const resp = await axios.get(url, {
-            timeout: TIMEOUT,
-            headers: { 'User-Agent': UA },
-            // 强制 axios 原样返回字符串，不做任何自动 JSON 解析
-            transformResponse: [(data) => data]
-        });
-        if (resp.status !== 200) {
-            logger.info('[repo-probe] fetchText non-200: status=%s url=%s', resp.status, url);
-            return { text: null, statusCode: resp.status, networkError: null };
-        }
-        const text = resp.data;
-        if (typeof text !== 'string') {
-            logger.info('[repo-probe] fetchText unexpected data type=%s url=%s', typeof text, url);
-            return { text: null, statusCode: resp.status, networkError: 'invalid_data_type' };
-        }
-        return { text, statusCode: 200, networkError: null };
-    } catch (e) {
-        let networkError = 'network';
-        if (e.code === 'ECONNABORTED' || (e.message && e.message.includes('timeout'))) {
-            networkError = 'timeout';
-        } else if (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN') {
-            networkError = 'dns';
-        } else if (e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET') {
-            networkError = 'connection';
-        }
-        logger.info('[repo-probe] fetchText error: %s (code=%s, networkError=%s) url=%s', e.message, e.code, networkError, url);
-        return { text: null, statusCode: null, networkError };
+    // 直连优先，GitHub 域名（raw.githubusercontent.com 等）追加镜像兜底
+    const { resp, statusCode, networkError } = await requestWithFallback(url, {
+        // 强制 axios 原样返回字符串，不做任何自动 JSON 解析（详见上方说明）
+        transformResponse: [(data) => data]
+    });
+    if (!resp) {
+        logger.info('[repo-probe] fetchText failed: status=%s networkError=%s url=%s', statusCode, networkError, url);
+        return { text: null, statusCode, networkError };
     }
+    if (resp.status !== 200) {
+        logger.info('[repo-probe] fetchText non-200: status=%s url=%s', resp.status, url);
+        return { text: null, statusCode: resp.status, networkError: null };
+    }
+    const text = resp.data;
+    if (typeof text !== 'string') {
+        logger.info('[repo-probe] fetchText unexpected data type=%s url=%s', typeof text, url);
+        return { text: null, statusCode: resp.status, networkError: 'invalid_data_type' };
+    }
+    return { text, statusCode: 200, networkError: null };
 }
 
 /**
  * 下载二进制文件，返回 Buffer
  */
 async function fetchBuffer(url) {
-    try {
-        const resp = await axios.get(url, {
-            timeout: TIMEOUT,
-            responseType: 'arraybuffer',
-            headers: { 'User-Agent': UA }
-        });
-        if (resp.status !== 200) {
-            logger.info('[repo-probe] fetchBuffer non-200: status=%s url=%s', resp.status, url);
-            return null;
-        }
-        return Buffer.from(resp.data);
-    } catch (e) {
-        logger.info('[repo-probe] fetchBuffer error: %s url=%s', e.message, url);
+    // 直连优先，GitHub 域名追加镜像兜底
+    const { resp } = await requestWithFallback(url, { responseType: 'arraybuffer' });
+    if (!resp || resp.status !== 200) {
+        logger.info('[repo-probe] fetchBuffer failed: status=%s url=%s', resp ? resp.status : 'no-response', url);
         return null;
     }
+    return Buffer.from(resp.data);
+}
+
+/**
+ * 下载 JSON 文件（用于 GitHub / Gitee Release API）
+ * 直连优先，GitHub 域名追加镜像兜底。
+ * @returns {Promise<{data:any, statusCode:number|null, networkError:string|null}>}
+ */
+async function fetchJson(url, headers = {}) {
+    const { resp, statusCode, networkError } = await requestWithFallback(url, { headers });
+    if (!resp) {
+        logger.info('[repo-probe] fetchJson failed: status=%s networkError=%s url=%s', statusCode, networkError, url);
+        return { data: null, statusCode, networkError };
+    }
+    return { data: resp.data, statusCode: resp.status, networkError: null };
 }
 
 /**
