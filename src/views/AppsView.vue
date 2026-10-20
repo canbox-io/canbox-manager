@@ -15,7 +15,11 @@ const appsStore = useAppsStore();
 
 // 分类筛选（固定枚举 9 项 + other，与 canbox-core APP_CATEGORIES 一致）
 const CATEGORY_FILTERS = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
-const categoryFilter = ref('');
+// 分类筛选值绑定到 apps store，路由切换后保持状态
+const categoryFilter = computed({
+    get: () => appsStore.categoryFilter,
+    set: (v) => appsStore.setCategory(v)
+});
 
 function categoryLabel(cat) {
     return t(`catalog.category_${cat}`);

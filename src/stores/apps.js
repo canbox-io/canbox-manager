@@ -4,6 +4,12 @@ import { ref } from 'vue';
 export const useAppsStore = defineStore('apps', () => {
     const apps = ref([]);
     const loading = ref(false);
+    // 分类筛选（'' 表示全部分类），提升到 store 以在路由切换后保持状态
+    const categoryFilter = ref('');
+
+    function setCategory(c) {
+        categoryFilter.value = c;
+    }
 
     async function fetchApps() {
         loading.value = true;
@@ -68,6 +74,8 @@ export const useAppsStore = defineStore('apps', () => {
     return {
         apps,
         loading,
+        categoryFilter,
+        setCategory,
         fetchApps,
         importApp,
         removeApp,
