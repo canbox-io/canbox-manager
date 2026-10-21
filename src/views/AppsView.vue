@@ -338,7 +338,7 @@ async function handleUpdateApp(app) {
             }
         }
 
-        const installResult = await reposStore.installByRepoUrl(update.repoUrl, { firstDownloadFrom: 'default' });
+        const installResult = await reposStore.installByRepoUrl(update.repoUrl, { firstDownloadFrom: 'default', latestVersion: update.newVersion });
         if (!installResult || !installResult.success) {
             notification.error((installResult && installResult.error) || t('common.error'));
             return;

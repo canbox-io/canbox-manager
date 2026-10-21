@@ -333,7 +333,7 @@ async function handleSyncAll() {
 
 async function handleInstall(repo) {
     // 默认组：与仓库源组完全对等，统一调 installByRepoUrl(repo.url, ...)
-    const result = await reposStore.installByRepoUrl(repo.url, { firstDownloadFrom: 'default' });
+    const result = await reposStore.installByRepoUrl(repo.url, { firstDownloadFrom: 'default', latestVersion: repo.version });
     if (result.success) {
         notification.success(t('repos.installSuccess'));
     } else {
@@ -461,7 +461,7 @@ async function handleInstallFromCatalog(app) {
     // 不再调 addRepo 污染默认组 repos 表
     const sourceId = catalogStore.currentSourceId;
     try {
-        const result = await reposStore.installByRepoUrl(app.repo, { firstDownloadFrom: sourceId });
+        const result = await reposStore.installByRepoUrl(app.repo, { firstDownloadFrom: sourceId, latestVersion: app.appVersion });
         if (result && result.success) {
             notification.success(t('repos.installSuccess'));
         } else if (result) {

@@ -1801,6 +1801,8 @@ function getInstalledVersion(installedAppId) {
  * @param {string} repoUrl 仓库 URL（主键，三组公共）
  * @param {object} [options]
  * @param {string} [options.firstDownloadFrom] 'default' | sourceId（首次下载记录来源，仅记录一次）
+ * @param {string} [options.latestVersion] 调用方已知的最新版本（catalog/repo 展示版本）；
+ *        与追踪表缓存不一致时强制重新 probe，避免按旧版本下载资产
  * @returns {Promise<{success:boolean, appId?:string, isUpdate?:boolean, error?:string}>}
  */
 async function installByRepoUrl(repoUrl, options = {}) {
@@ -1817,13 +1819,18 @@ async function installByRepoUrl(repoUrl, options = {}) {
             ? `hit appId=${record.appId} version=${record.version} installedAppId=${record.installedAppId || '(none)'} installedVersion=${record.installedVersion || '(none)'}`
             : 'miss');
 
-        // 2. 缺 appId 或版本过期 → probe 补全（阈值 24 小时）
+        // 2. 缺 appId、版本过期，或调用方声明的最新版本与缓存不一致 → probe 补全（阈值 24 小时）
+        // 版本不一致时必须重新探测：追踪表缓存可能落后于 UI 展示的 catalog 版本，
+        // 否则会按旧版本号下载 release 资产（表现为更新成功但版本不变）。
         const PROBE_STALE_MS = 24 * 60 * 60 * 1000;
+        const versionMismatch = !!(options.latestVersion && record && record.version &&
+            options.latestVersion !== record.version);
         const needProbe = !record || !record.appId || !record.lastProbeAt ||
-            (Date.now() - record.lastProbeAt) > PROBE_STALE_MS;
+            (Date.now() - record.lastProbeAt) > PROBE_STALE_MS || versionMismatch;
         if (needProbe) {
             logger.info('[install] step2 probe repo (reason=%s)', !record ? 'no record'
-                : (!record.appId ? 'no appId' : 'stale'));
+                : (!record.appId ? 'no appId'
+                    : (versionMismatch ? `version mismatch cached=${record.version} latest=${options.latestVersion}` : 'stale')));
             const probed = await repoProbe.probeRepo(repoUrl);
             record = record || { repoUrl };
             record.appId = probed.id;
