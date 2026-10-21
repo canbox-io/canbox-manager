@@ -739,7 +739,7 @@ async function installDeveloper() {
     flex-wrap: wrap;
 }
 .app-name {
-    font-size: 16px;
+    font-size: 21px;
     font-weight: 600;
     color: var(--el-text-color-primary);
 }

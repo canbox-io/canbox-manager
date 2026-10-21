@@ -1149,7 +1149,7 @@ const searchTotal = computed(() =>
 }
 
 .repo-name {
-    font-size: 15px;
+    font-size: 20px;
     font-weight: 600;
     color: var(--el-text-color-primary);
     overflow: hidden;
@@ -1308,6 +1308,7 @@ const searchTotal = computed(() =>
 }
 
 .catalog-app-name {
+    font-size: 20px;
     cursor: pointer;
     color: var(--el-text-color-primary);
     font-weight: 600;
