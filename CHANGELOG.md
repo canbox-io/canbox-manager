@@ -4,6 +4,32 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.4] - 2026-10-21
+
+### feat | 新功能 / Features
+
+为仓库探测的 GitHub 请求增加“直连优先 + 第三方镜像兜底”的网络策略，直连不可达时自动切换镜像线路，并记忆最近可用线路
+
+Add a "direct-first + mirror fallback" network strategy for GitHub requests in repo probing, automatically switching to mirrors and remembering the last working route
+
+### fix | 问题修复 / Bug Fixes
+
+修复应用安装/更新时可能按旧版本下载资产的问题，确保按最新版本获取下载资产
+
+Fix APP install/update sometimes downloading assets of an older version; downloads now use the latest release
+
+### refactor | 重构 / Refactoring
+
+“我的应用”界面将分类筛选状态提升至 store，路由切换返回后保持原有筛选
+
+Move the category filter state of the My Apps view into the store so the selection persists after route switches
+
+### style | 样式 / Styling
+
+增大“我的应用”“应用仓库”卡片中 APP 名称的字体大小
+
+Increase APP name font size in the My Apps and Repositories cards
+
 ## [0.3.3] - 2026-10-18
 
 ### feat | 新功能 / Features
