@@ -148,7 +148,8 @@ canbox-manager/
 │   ├── views/                # 页面视图
 │   └── utils/                # 工具函数
 ├── LICENSE
-└── README.md
+├── README.md
+└── README_zh-CN.md
 ```
 
 ## 开发

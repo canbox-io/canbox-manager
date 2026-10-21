@@ -148,7 +148,8 @@ canbox-manager/
 │   ├── views/                # page views
 │   └── utils/                # utilities
 ├── LICENSE
-└── README.md
+├── README.md
+└── README_zh-CN.md
 ```
 
 ## Development
