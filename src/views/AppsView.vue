@@ -6,6 +6,7 @@ import { ElMessageBox } from 'element-plus';
 import { useAppsStore } from '@/stores/apps';
 import { useReposStore } from '@/stores/repos';
 import { useElectronStore } from '@/stores/electron';
+import { translateIpcError } from '@/i18n';
 import notification from '@/utils/notification';
 import WebAppEditor from './WebAppEditor.vue';
 
@@ -340,7 +341,7 @@ async function handleUpdateApp(app) {
 
         const installResult = await reposStore.installByRepoUrl(update.repoUrl, { firstDownloadFrom: 'default', latestVersion: update.newVersion });
         if (!installResult || !installResult.success) {
-            notification.error((installResult && installResult.error) || t('common.error'));
+            notification.error(translateIpcError(t, installResult, 'common.error'));
             return;
         }
         notification.success(t('apps.updateSuccess'));
@@ -397,7 +398,7 @@ async function installDeveloper() {
         if (installResult.success) {
             notification.success(t('developer.installSuccess'));
         } else {
-            notification.error(installResult.error || t('developer.installFailed'));
+            notification.error(translateIpcError(t, installResult, 'developer.installFailed'));
         }
     } catch (e) {
         notification.error(e.message || t('developer.installFailed'));

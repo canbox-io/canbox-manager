@@ -5,6 +5,7 @@ import { ElMessageBox } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import { useReposStore } from '@/stores/repos';
 import { useCatalogStore } from '@/stores/catalog';
+import { translateIpcError } from '@/i18n';
 import notification from '@/utils/notification';
 
 const { t } = useI18n();
@@ -337,7 +338,7 @@ async function handleInstall(repo) {
     if (result.success) {
         notification.success(t('repos.installSuccess'));
     } else {
-        notification.error(result.error || t('repos.installFailed'));
+        notification.error(translateIpcError(t, result, 'repos.installFailed'));
     }
 }
 
@@ -465,7 +466,7 @@ async function handleInstallFromCatalog(app) {
         if (result && result.success) {
             notification.success(t('repos.installSuccess'));
         } else if (result) {
-            notification.error(result.error || t('repos.installFailed'));
+            notification.error(translateIpcError(t, result, 'repos.installFailed'));
         }
     } catch (e) {
         notification.error(e.message || t('repos.installFailed'));

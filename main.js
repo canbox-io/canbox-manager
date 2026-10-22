@@ -1863,7 +1863,9 @@ async function installByRepoUrl(repoUrl, options = {}) {
                 repoUrl, record.name, record.version);
             return {
                 success: false,
-                error: `未找到 ${record.name} v${record.version} 的 release 下载资产，请确认仓库已发布对应版本`
+                error: `未找到 ${record.name} v${record.version} 的 release 下载资产，请确认仓库已发布对应版本`,
+                errorCode: 'repos.releaseAssetNotFound',
+                errorParams: { name: record.name, version: record.version }
             };
         }
         const os = require('os');

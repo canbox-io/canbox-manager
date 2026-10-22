@@ -94,6 +94,7 @@
         "update": "Update",
         "installSuccess": "Installed successfully",
         "installFailed": "Installation failed",
+        "releaseAssetNotFound": "No release asset found for {name} v{version}. Please make sure the repository has published the corresponding version.",
         "installed": "Installed",
         "hasUpdate": "Update available",
         "probeFailed": "Probe failed",
