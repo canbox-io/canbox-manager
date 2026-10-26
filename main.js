@@ -1678,7 +1678,14 @@ function getReposStore() {
 }
 
 function getAllRepos() {
-    return getReposStore().get('repos') || {};
+    const repos = getReposStore().get('repos') || {};
+    // 旧版本误把 description 写入 displayName；读取时纠正为 APP 展示名，等下次 sync 覆盖
+    Object.values(repos).forEach(repo => {
+        if (repo && repo.displayName && repo.displayName === repo.description) {
+            repo.displayName = repo.name;
+        }
+    });
+    return repos;
 }
 
 function saveAllRepos(repos) {
@@ -1984,7 +1991,7 @@ ipcMain.handle('manager.repos.add', async (_e, url) => {
             url,
             appId: probed.id,
             name: probed.name,
-            displayName: probed.description || probed.name,
+            displayName: probed.displayName || probed.name,
             version: probed.version,
             description: probed.description,
             author: probed.author,
@@ -2058,7 +2065,7 @@ ipcMain.handle('manager.repos.sync', async (_e, repoId) => {
             ...repo,
             appId: probed.id,
             name: probed.name,
-            displayName: probed.description || probed.name,
+            displayName: probed.displayName || probed.name,
             version: probed.version,
             description: probed.description,
             author: probed.author,

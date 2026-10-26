@@ -348,7 +348,7 @@ async function openRepoReadme(repo) {
     readmeError.value = null;
     readmeContent.value = '';
     readmeHistory.value = [];
-    readmeTitle.value = repo.name;
+    readmeTitle.value = repo.displayName || repo.name;
     readmeContext.value = null;
     const result = await reposStore.getReadme(repo.id);
     readmeLoading.value = false;
@@ -357,7 +357,7 @@ async function openRepoReadme(repo) {
         // owner/repo/branch/rawBase/webBase 一律由主进程归一化返回，渲染层不解析平台
         readmeContext.value = {
             kind: 'repo',
-            appName: repo.name,
+            appName: repo.displayName || repo.name,
             repoUrl: repo.url,
             owner: result.owner,
             repo: result.repo,
@@ -433,7 +433,7 @@ async function openCatalogAppReadme(app) {
     readmeError.value = null;
     readmeContent.value = '';
     readmeHistory.value = [];
-    readmeTitle.value = app.name;
+    readmeTitle.value = app.displayName || app.name;
     readmeContext.value = null;
     const result = await catalogStore.fetchReadme(app.repo);
     readmeLoading.value = false;
@@ -442,7 +442,7 @@ async function openCatalogAppReadme(app) {
         // 与 openRepoReadme 同理：归一化字段全部来自主进程
         readmeContext.value = {
             kind: 'catalog',
-            appName: app.name,
+            appName: app.displayName || app.name,
             repoUrl: app.repo,
             owner: result.owner,
             repo: result.repo,
@@ -580,7 +580,7 @@ const searchGroups = computed(() => {
     catalogStore.sources.forEach(source => {
         const apps = (catalogStore.appsBySource[source.id] || []).filter(a => {
             const desc = a.description || a.description_en || '';
-            const hay = [a.name, desc, a.author, ...(a.tags || [])].join(' ').toLowerCase();
+            const hay = [a.displayName, a.name, desc, a.author, ...(a.tags || [])].join(' ').toLowerCase();
             if (!hay.includes(q)) return false;
             if (searchCategory.value && a.category !== searchCategory.value) return false;
             if (searchStatus.value && a.status !== searchStatus.value) return false;
@@ -670,7 +670,7 @@ const searchTotal = computed(() =>
                                 </div>
                                 <div class="repo-info">
                                     <div class="repo-name">
-                                        <span class="catalog-app-name" @click="openCatalogAppReadme(item)">{{ item.name }}</span>
+                                        <span class="catalog-app-name" @click="openCatalogAppReadme(item)">{{ item.displayName || item.name }}</span>
                                         <el-tag v-if="reposStore.getInstallState(item.repo).installed && reposStore.getInstallState(item.repo).toUpdate" type="warning" size="small" effect="light">{{ $t('repos.hasUpdate') }}</el-tag>
                                         <el-tag v-else-if="reposStore.getInstallState(item.repo).installed" type="success" size="small" effect="light">{{ $t('repos.installed') }}</el-tag>
                                         <el-tag v-else size="small" :type="statusType(item.status)" effect="light" round>{{ statusLabel(item.status) }}</el-tag>
@@ -878,7 +878,7 @@ const searchTotal = computed(() =>
                         </div>
                         <div class="repo-info">
                             <div class="repo-header-row">
-                                <span class="catalog-app-name" @click="openCatalogAppReadme(app)" :title="$t('catalog.viewReadme')">{{ app.name }}</span>
+                                <span class="catalog-app-name" @click="openCatalogAppReadme(app)" :title="$t('catalog.viewReadme')">{{ app.displayName || app.name }}</span>
                                 <el-tag v-if="reposStore.getInstallState(app.repo).installed && reposStore.getInstallState(app.repo).toUpdate" type="warning" size="small" effect="light">{{ $t('repos.hasUpdate') }}</el-tag>
                                 <el-tag v-else-if="reposStore.getInstallState(app.repo).installed" type="success" size="small" effect="light">{{ $t('repos.installed') }}</el-tag>
                                 <el-tag v-else size="small" :type="statusType(app.status)" effect="light" round>{{ statusLabel(app.status) }}</el-tag>

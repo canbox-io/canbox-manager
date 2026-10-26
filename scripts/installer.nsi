@@ -23,7 +23,7 @@ SetCompressor zlib
 ; ====== Version info ======
 VIProductVersion "0.1.0.0"
 VIAddVersionKey "ProductName" "Canbox"
-VIAddVersionKey "CompanyName" "lizl6"
+VIAddVersionKey "CompanyName" "canbox-io"
 VIAddVersionKey "LegalCopyright" "Apache-2.0"
 VIAddVersionKey "FileDescription" "Canbox application platform"
 VIAddVersionKey "FileVersion" "0.1.0.0"
@@ -75,7 +75,7 @@ Section "Canbox" SecMain
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "DisplayIcon" "$\"$INSTDIR\manager\icons\icon.ico$\""
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "DisplayVersion" "0.1.0"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "Publisher" "lizl6"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Canbox" "Publisher" "canbox-io"
 
     ; Start menu shortcuts (manager) - use icon.ico
     CreateDirectory "$SMPROGRAMS\Canbox"

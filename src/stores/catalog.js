@@ -58,6 +58,7 @@ export const useCatalogStore = defineStore('catalog', () => {
             ? (app.description || app.description_en || '')
             : (app.description_en || app.description || '');
         return (
+            (app.displayName || app.name || '').toLowerCase().includes(q) ||
             (app.name || '').toLowerCase().includes(q) ||
             desc.toLowerCase().includes(q) ||
             (app.author || '').toLowerCase().includes(q) ||
@@ -79,7 +80,7 @@ export const useCatalogStore = defineStore('catalog', () => {
         } else if (sortBy.value === 'updated') {
             apps.sort((a, b) => new Date(b.lastCommitAt || 0) - new Date(a.lastCommitAt || 0));
         } else if (sortBy.value === 'name') {
-            apps.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            apps.sort((a, b) => (a.displayName || a.name || '').localeCompare(b.displayName || b.name || ''));
         }
         return apps;
     });

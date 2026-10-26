@@ -512,6 +512,8 @@ async function probeRepo(repoUrl, options = {}) {
     return {
         id: pkg.id || pkg.name,
         name: pkg.name,
+        // 展示名：package.json 的 displayName 优先，name 兜底
+        displayName: pkg.displayName || pkg.name,
         version: pkg.version || '0.0.0',
         description: pkg.description || '',
         author: pkg.author || '',
