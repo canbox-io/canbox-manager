@@ -1042,7 +1042,7 @@ app.setAppUserModelId('com.canbox.web.${appId}');
 // Chrome UA 伪装
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
-const TAB_BAR_HEIGHT = 35;
+const TAB_BAR_HEIGHT = 52.5;
 const tabs = [];
 let tabIdSeq = 0;
 let activeTabId = null;
@@ -1302,21 +1302,21 @@ function renderWebAppTabbarHtml() {
   }
   .tab-bar {
     display: flex; align-items: flex-end;
-    height: 35px; padding: 0 8px; gap: 2px;
+    height: 52.5px; padding: 0 8px; gap: 2px;
     background: #e4e7ed;
     overflow: hidden;
   }
   .tab-bar.hidden { display: none; }
   .tab {
     display: flex; align-items: center; gap: 8px;
-    min-width: 110px; max-width: 220px; height: 28px;
+    min-width: 110px; max-width: 220px; height: 42px;
     padding: 0 16px; margin-bottom: -1px;
     background: #f0f2f5;
     border: 1px solid #e4e7ed;
     border-bottom: none;
     border-radius: 4px 4px 0 0;
     cursor: pointer;
-    font-size: 14px; font-weight: 600; color: #909399;
+    font-size: 21px; font-weight: 600; color: #909399;
     position: relative;
     transition: background 0.12s, color 0.12s;
   }
@@ -1325,7 +1325,7 @@ function renderWebAppTabbarHtml() {
     background: #ffffff;
     color: #303133;
     border-color: #dcdfe6;
-    height: 29px;
+    height: 43.5px;
   }
   .tab.active::before {
     content: '';
