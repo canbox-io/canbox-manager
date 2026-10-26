@@ -4,6 +4,34 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.5] - 2026-10-26
+
+### feat | 新功能 / Features
+
+新增 displayName 字段用于应用展示：仓库与目录中的应用名称统一优先展示 displayName，缺失时回退 name；读取时兼容修正旧版本误将 description 写入 displayName 的数据
+新增 release 资产未找到的结构化错误码与国际化提示：主进程返回 errorCode/errorParams，渲染层按当前界面语言翻译错误文案
+
+Add a displayName field for app display: app names in repositories and the catalog now prefer displayName with a fallback to name, and legacy data where description was mistakenly stored as displayName is corrected on read
+Add a structured error code and localized message for missing release assets: the main process returns errorCode/errorParams and the renderer translates them into the current UI language
+
+### docs | 文档 / Documentation
+
+新增简体中文 README 文档并更新英文 README 内容
+
+Add a Simplified Chinese README and update the English README
+
+### chore | 维护 / Maintenance
+
+版本号升级至 0.3.5
+
+Bump version to 0.3.5
+
+### style | 样式 / Styling
+
+增大网页应用多标签页标签栏的高度与字号（均增加 50%），优化显示效果
+
+Increase the height and font size (both by 50%) of the tab bar in multi-tab web apps
+
 ## [0.3.4] - 2026-10-21
 
 ### feat | 新功能 / Features
