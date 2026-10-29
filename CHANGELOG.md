@@ -4,6 +4,28 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.6] - 2026-10-29
+
+### refactor | 重构 / Refactoring
+
+重构更新检查与安装逻辑，引入 Catalog 版本准绳：只有数据源版本高于本机版本才判定为可更新，本机版本高于数据源版本不再误报升级提示
+安装目标版本严格取自展示的 Catalog 版本，probe 仅补全元数据、不再覆盖目标版本；本机版本不低于目标版本时直接返回已是最新，避免重复下载
+“我的应用”更新检查优先采用 Catalog 中的 appVersion，默认组与 Catalog 未收录的仓库回退到仓库探测
+复用语义化版本比较工具 compareVersions，消除基于字符串不等式的版本误判
+制品缺失提示补充“或等待数据源同步到新版本”的中英文文案
+
+Refactor update checking and installation with the catalog version as the authority: an update is reported only when the source version is higher than the local version, so a newer local version no longer shows a false upgrade prompt
+Install exactly the version displayed by the catalog; probing now only fills metadata and no longer overrides the target version, and installation returns "already up to date" when the local version is not lower, avoiding duplicate downloads
+The "My Apps" update check now prefers the catalog appVersion and falls back to probing for default-group repos or repos missing from the catalog
+Reuse the semantic compareVersions helper to eliminate version misjudgments caused by plain string inequality
+Extend the missing-release-asset message in both Chinese and English to suggest waiting for the data source to sync
+
+### build | 构建 / Build
+
+版本号升级至 0.3.6
+
+Bump version to 0.3.6
+
 ## [0.3.5] - 2026-10-26
 
 ### feat | 新功能 / Features
