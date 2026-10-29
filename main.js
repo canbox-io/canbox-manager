@@ -674,41 +674,70 @@ ipcMain.handle('manager.apps.repairLauncher', async (_e, appId) => {
     return result;
 });
 
-// 检查所有已安装 APP 的更新：遍历统一下载追踪表 catalog-repos.json，
-// 对有 installedAppId 的记录 probe 仓库最新版本，更新追踪表的 version/installedVersion/toUpdate。
+// 汇总各 Catalog 源缓存中的 repoUrl → appVersion 映射。
+// Catalog 是版本准绳：APP 在 Catalog 中时，更新判定只认 Catalog 的版本。
+function collectCatalogVersions() {
+    const map = new Map();
+    for (const source of catalogManager.listSources()) {
+        const cached = catalogManager.readCachedCatalog(source.id);
+        for (const app of cached.apps || []) {
+            if (app && app.repo && app.appVersion) {
+                map.set(repoProbe.normalizeRepoUrl(app.repo), app.appVersion);
+            }
+        }
+    }
+    return map;
+}
+
+// 检查所有已安装 APP 的更新：遍历统一下载追踪表 catalog-repos.json。
+// 从 Catalog 源安装的 APP 以其 appVersion 为准；默认组与 Catalog 中查不到的直接 probe。
 async function checkAllAppUpdates() {
     const allRecords = getAllCatalogRepoRecords();
     const repoUrls = Object.keys(allRecords).filter(u => allRecords[u] && allRecords[u].installedAppId);
-    logger.info('[checkUpdates] start, records=%d toCheck=%d', Object.keys(allRecords).length, repoUrls.length);
+    const catalogVersions = collectCatalogVersions();
+    logger.info('[checkUpdates] start, records=%d toCheck=%d catalogKnown=%d',
+        Object.keys(allRecords).length, repoUrls.length, catalogVersions.size);
     const updates = [];
     for (const repoUrl of repoUrls) {
         const record = allRecords[repoUrl];
         const startedAt = Date.now();
         try {
-            logger.info('[checkUpdates] probing repoUrl=%s installedAppId=%s currentVersion=%s',
-                repoUrl, record.installedAppId, record.installedVersion || '(unknown)');
-            const probed = await repoProbe.probeRepo(repoUrl);
+            // 默认组（用户手动添加的仓库）版本准绳是 repos.json 的探测结果，走 probe；
+            // 其余（内置/自定义 Catalog 源）以 Catalog 的 appVersion 为准。
+            const catalogVersion = record.firstDownloadFrom === 'default'
+                ? null
+                : catalogVersions.get(repoProbe.normalizeRepoUrl(repoUrl));
+            let latestVersion = catalogVersion || null;
+            let probed = null;
+            if (!latestVersion) {
+                logger.info('[checkUpdates] probing repoUrl=%s installedAppId=%s currentVersion=%s',
+                    repoUrl, record.installedAppId, record.installedVersion || '(unknown)');
+                probed = await repoProbe.probeRepo(repoUrl);
+                latestVersion = probed.version;
+            }
             const installedVersion = getInstalledVersion(record.installedAppId);
-            const toUpdate = !!installedVersion && installedVersion !== probed.version;
-            record.version = probed.version;
+            const toUpdate = !!installedVersion && !!latestVersion &&
+                updater.compareVersions(latestVersion, installedVersion) > 0;
+            record.version = latestVersion;
             record.installedVersion = installedVersion;
             record.toUpdate = toUpdate;
-            record.lastProbeAt = Date.now();
+            if (probed) record.lastProbeAt = Date.now();
             saveCatalogRepoRecord(repoUrl, record);
-            logger.info('[checkUpdates] probed repoUrl=%s repoVersion=%s installedVersion=%s toUpdate=%s elapsed=%dms',
-                repoUrl, probed.version, installedVersion || '(unknown)', toUpdate, Date.now() - startedAt);
+            logger.info('[checkUpdates] checked repoUrl=%s source=%s repoVersion=%s installedVersion=%s toUpdate=%s elapsed=%dms',
+                repoUrl, catalogVersion ? 'catalog' : 'probe', latestVersion,
+                installedVersion || '(unknown)', toUpdate, Date.now() - startedAt);
             if (toUpdate) {
                 updates.push({
                     repoUrl,
                     appId: record.installedAppId,
                     name: record.name,
                     currentVersion: installedVersion,
-                    newVersion: probed.version
+                    newVersion: latestVersion
                 });
             }
         } catch (e) {
-            // 单个仓库 probe 失败不影响其他
-            logger.error('[checkUpdates] probe failed for %s: %s (elapsed=%dms)',
+            // 单个仓库检查失败不影响其他
+            logger.error('[checkUpdates] check failed for %s: %s (elapsed=%dms)',
                 repoUrl, e.message, Date.now() - startedAt);
         }
     }
@@ -1802,15 +1831,15 @@ function getInstalledVersion(installedAppId) {
 
 /**
  * 统一下载入口：以 repoUrl 为公共主键，处理三组（默认组/内置仓库源/自定义仓库源）下载。
- * 流程：查追踪表 → 缺 appId 或版本过期则 probe → 判断安装状态 → 下载 → 安装 → 写追踪表 → 生成 launcher
+ * 流程：查追踪表 → 缺 appId/name 则 probe → 判断安装状态 → 下载 → 安装 → 写追踪表 → 生成 launcher
  * 进度事件 manager.repos.installProgress 以 repoUrl 为 key，三组统一。
  *
  * @param {string} repoUrl 仓库 URL（主键，三组公共）
  * @param {object} [options]
  * @param {string} [options.firstDownloadFrom] 'default' | sourceId（首次下载记录来源，仅记录一次）
- * @param {string} [options.latestVersion] 调用方已知的最新版本（catalog/repo 展示版本）；
- *        与追踪表缓存不一致时强制重新 probe，避免按旧版本下载资产
- * @returns {Promise<{success:boolean, appId?:string, isUpdate?:boolean, error?:string}>}
+ * @param {string} [options.latestVersion] 调用方展示的版本（catalog/repo），即安装目标版本；
+ *        未提供时才使用 probe 得到的版本
+ * @returns {Promise<{success:boolean, appId?:string, isUpdate?:boolean, upToDate?:boolean, error?:string}>}
  */
 async function installByRepoUrl(repoUrl, options = {}) {
     if (!repoUrl) return { success: false, error: 'repoUrl 不能为空' };
@@ -1826,30 +1855,33 @@ async function installByRepoUrl(repoUrl, options = {}) {
             ? `hit appId=${record.appId} version=${record.version} installedAppId=${record.installedAppId || '(none)'} installedVersion=${record.installedVersion || '(none)'}`
             : 'miss');
 
-        // 2. 缺 appId、版本过期，或调用方声明的最新版本与缓存不一致 → probe 补全（阈值 24 小时）
-        // 版本不一致时必须重新探测：追踪表缓存可能落后于 UI 展示的 catalog 版本，
-        // 否则会按旧版本号下载 release 资产（表现为更新成功但版本不变）。
-        const PROBE_STALE_MS = 24 * 60 * 60 * 1000;
-        const versionMismatch = !!(options.latestVersion && record && record.version &&
-            options.latestVersion !== record.version);
-        const needProbe = !record || !record.appId || !record.lastProbeAt ||
-            (Date.now() - record.lastProbeAt) > PROBE_STALE_MS || versionMismatch;
+        // 2. 缺 appId/name，或调用方未提供版本 → probe 补全元数据。
+        // Catalog 是版本准绳：调用方声明的 latestVersion 即安装目标版本，
+        // probe 不覆盖目标版本。
+        const targetVersion = options.latestVersion || null;
+        const needProbe = !record || !record.appId || !record.name || !targetVersion;
         if (needProbe) {
             logger.info('[install] step2 probe repo (reason=%s)', !record ? 'no record'
                 : (!record.appId ? 'no appId'
-                    : (versionMismatch ? `version mismatch cached=${record.version} latest=${options.latestVersion}` : 'stale')));
+                    : (!record.name ? 'no name' : 'no target version')));
             const probed = await repoProbe.probeRepo(repoUrl);
             record = record || { repoUrl };
             record.appId = probed.id;
-            record.version = probed.version;
             record.name = probed.name;
+            record.version = targetVersion || probed.version;
             record.lastProbeAt = Date.now();
             // 首次下载记录来源（仅记录一次，后续不覆盖）
             if (isFirstDownload && options.firstDownloadFrom) {
                 record.firstDownloadFrom = options.firstDownloadFrom;
             }
             saveCatalogRepoRecord(repoUrl, record);
-            logger.info('[install] step2 probe done: id=%s name=%s version=%s', probed.id, probed.name, probed.version);
+            logger.info('[install] step2 probe done: id=%s name=%s targetVersion=%s source=%s',
+                probed.id, probed.name, record.version, targetVersion ? 'caller' : 'probe');
+        } else if (targetVersion && record.version !== targetVersion) {
+            // 追踪表缓存与展示版本不一致时，以调用方（Catalog）版本为准，不额外 probe
+            logger.info('[install] step2 use caller version: cached=%s target=%s', record.version, targetVersion);
+            record.version = targetVersion;
+            saveCatalogRepoRecord(repoUrl, record);
         } else {
             logger.info('[install] step2 skip probe (record fresh)');
         }
@@ -1857,9 +1889,21 @@ async function installByRepoUrl(repoUrl, options = {}) {
         // 3. 判断安装状态（复用全局 idMap）
         const existingAppId = record.installedAppId || checkInstalled(record.appId);
         const installedVersion = getInstalledVersion(existingAppId);
-        const isUpdate = !!existingAppId && installedVersion !== record.version;
+        const isUpdate = !!existingAppId && (!installedVersion ||
+            updater.compareVersions(record.version, installedVersion) > 0);
         logger.info('[install] step3 state: appId=%s existingAppId=%s installedVersion=%s repoVersion=%s isUpdate=%s installed=%s',
             record.appId, existingAppId || '(none)', installedVersion || '(none)', record.version, isUpdate, !!existingAppId);
+
+        // 本机版本不低于安装目标版本时直接返回，避免重复下载同一版本
+        if (existingAppId && installedVersion &&
+            updater.compareVersions(record.version, installedVersion) <= 0) {
+            record.installedVersion = installedVersion;
+            record.toUpdate = false;
+            saveCatalogRepoRecord(repoUrl, record);
+            logger.info('[install] already up to date, skip download: appId=%s installed=%s target=%s',
+                existingAppId, installedVersion, record.version);
+            return { success: true, appId: existingAppId, isUpdate: false, upToDate: true };
+        }
 
         // 4. 下载（复用现有逻辑，与原 installRepo 完全相同）
         const downloadUrl = await repoProbe.getReleaseDownloadUrl(
@@ -1870,7 +1914,7 @@ async function installByRepoUrl(repoUrl, options = {}) {
                 repoUrl, record.name, record.version);
             return {
                 success: false,
-                error: `未找到 ${record.name} v${record.version} 的 release 下载资产，请确认仓库已发布对应版本`,
+                error: `未找到 ${record.name} v${record.version} 的 release 下载资产，请确认仓库已发布对应版本，或等待数据源同步到新版本`,
                 errorCode: 'repos.releaseAssetNotFound',
                 errorParams: { name: record.name, version: record.version }
             };
@@ -1941,8 +1985,10 @@ function getInstallState(repoUrl, latestVersion) {
     const record = getCatalogRepoRecord(repoUrl);
     if (!record || !record.installedAppId) return { installed: false };
     const installedVersion = record.installedVersion || getInstalledVersion(record.installedAppId);
+    // Catalog 版本为准绳：只有源版本高于本机版本才算可更新；
+    // 本机版本高于源版本（数据源尚未同步到新版本）不算更新。
     const toUpdate = latestVersion
-        ? !!installedVersion && installedVersion !== latestVersion
+        ? !!installedVersion && updater.compareVersions(latestVersion, installedVersion) > 0
         : !!record.toUpdate;
     return {
         installed: true,

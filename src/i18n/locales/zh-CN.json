@@ -89,7 +89,7 @@
         "update": "更新",
         "installSuccess": "安装成功",
         "installFailed": "安装失败",
-        "releaseAssetNotFound": "未找到 {name} v{version} 的 release 下载资产，请确认仓库已发布对应版本",
+        "releaseAssetNotFound": "未找到 {name} v{version} 的 release 下载资产，请确认仓库已发布对应版本，或等待数据源同步到新版本",
         "installed": "已安装",
         "hasUpdate": "有更新",
         "probeFailed": "探测失败",

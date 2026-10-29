@@ -465,5 +465,6 @@ function runInstallerAndQuit(installerPath) {
 module.exports = {
     checkUpdate,
     downloadInstaller,
-    runInstallerAndQuit
+    runInstallerAndQuit,
+    compareVersions
 };
