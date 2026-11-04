@@ -4,6 +4,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.7] - 2026-11-04
+
+### perf | 性能 / Performance
+
+将目录自动刷新周期从 24 小时缩短为 10 分钟（附加随机抖动），后台检查间隔调整为 5 分钟，缩短新版本在桌面端可见的延迟
+catalog.json 返回 304 时复用本地分片缓存，跳过分片条件请求，无变化检查的网络请求从 1+N 降为 1
+识别旧版本写入的 24 小时刷新周期，升级后立即刷新一次并改写为新周期
+目录内容变化后自动复查已安装应用，发现可更新时即时提示
+手动刷新冷却时间由 60 分钟缩短至 5 分钟
+
+Shorten the automatic catalog refresh interval from 24 hours to 10 minutes with random jitter, and adjust the background check cadence to 5 minutes, reducing the delay before new versions appear on desktop
+Reuse cached shards when catalog.json returns 304 and skip conditional shard requests, cutting an unchanged check from 1+N requests to 1
+Detect the legacy 24-hour refresh interval written by older versions, refresh once immediately after upgrade, and rewrite the meta with the new interval
+Automatically re-check installed apps after catalog content changes and notify immediately when updates are available
+Reduce the manual refresh cooldown from 60 minutes to 5 minutes
+
 ## [0.3.6] - 2026-10-29
 
 ### refactor | 重构 / Refactoring
