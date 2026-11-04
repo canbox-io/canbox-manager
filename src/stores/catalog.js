@@ -22,7 +22,7 @@ export const useCatalogStore = defineStore('catalog', () => {
     const currentSourceId = ref(localStorage.getItem(LS_CURRENT_SOURCE) || 'default');
 
     let lastManualRefreshAt = 0;
-    const MANUAL_REFRESH_COOLDOWN = 60 * 60 * 1000;
+    const MANUAL_REFRESH_COOLDOWN = 5 * 60 * 1000;
 
     const currentSource = computed(() =>
         sources.value.find(s => s.id === currentSourceId.value) || null

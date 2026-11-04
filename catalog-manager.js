@@ -24,6 +24,16 @@ const REQUEST_TIMEOUT = 20000;
 const CATALOG_SCHEMA_VERSION = 2;
 const MAX_SHARDS_WARN = 20;
 
+// 自动刷新周期：检查走 ETag 条件请求，无变化时只有 1 个 catalog.json 请求。
+// GitHub raw 前置 CDN 通常有数分钟缓存，再短也没有收益。
+const CATALOG_AUTO_REFRESH_MS = 10 * 60 * 1000;
+const CATALOG_REFRESH_JITTER_MS = 60 * 1000;
+
+function computeNextRefresh() {
+    const jitter = Math.round(Math.random() * CATALOG_REFRESH_JITTER_MS);
+    return new Date(Date.now() + CATALOG_AUTO_REFRESH_MS + jitter).toISOString();
+}
+
 // 通过 canbox-core 注入的 logger（log4js），写入 {usersPath}/logs/canbox.log
 // 若 logger 未初始化（如开发环境直接 require），降级为 console。
 // 注意：不在模块加载时获取，而是每次使用时动态获取——logger.init() 在 app.whenReady() 后异步执行
@@ -320,6 +330,67 @@ async function fetchCatalog(sourceId, options = {}) {
 
     const tooManyShards = catalog.totalShards > MAX_SHARDS_WARN;
 
+    // catalog.json 返回 304 说明没有新的 assemble：索引与分片在同一次提交里写入，
+    // 因此分片也不会变化。直接复用本地分片缓存，避免每个分片再发一次条件请求。
+    if (usedCachedCatalog && prevMeta && Array.isArray(prevMeta.shards) && prevMeta.shards.length > 0) {
+        const cachedShards = [];
+        let cacheComplete = true;
+        for (const s of prevMeta.shards) {
+            const data = readJsonSafe(path.join(cacheDir, s.file));
+            if (!data || !Array.isArray(data.apps)) {
+                cacheComplete = false;
+                break;
+            }
+            cachedShards.push({
+                id: s.id,
+                file: s.file,
+                appCount: data.apps.length,
+                etag: s.etag || null,
+                lastModified: s.lastModified || null,
+                apps: data.apps
+            });
+        }
+
+        if (cacheComplete) {
+            const apps = [];
+            cachedShards.forEach(s => apps.push(...s.apps));
+            const meta = {
+                version: 1,
+                sourceId,
+                lastRefresh: new Date().toISOString(),
+                nextRefresh: computeNextRefresh(),
+                catalogSchemaVersion: catalog.schemaVersion,
+                totalApps: catalog.totalApps,
+                totalShards: catalog.totalShards,
+                sourceName: catalog.sourceName || source.name,
+                source: catalog.source || null,
+                catalogEtag,
+                catalogLastModified,
+                shards: cachedShards.map(s => ({
+                    id: s.id,
+                    file: s.file,
+                    appCount: s.appCount,
+                    etag: s.etag,
+                    lastModified: s.lastModified
+                }))
+            };
+            writeCacheMeta(sourceId, meta);
+            logger.info('[catalog] fetchCatalog: catalog not modified, reuse cached shards sourceId=%s apps=%d',
+                sourceId, apps.length);
+            return {
+                success: true,
+                fromCache: false,
+                catalogUnchanged: true,
+                notModified: true,
+                partialFailed: false,
+                tooManyShards,
+                apps,
+                meta,
+                source
+            };
+        }
+    }
+
     // 并行拉取各分片（带 ETag 条件请求）
     const prevShardMap = {};
     for (const s of (prevMeta && prevMeta.shards) || []) prevShardMap[s.id] = s;
@@ -406,7 +477,7 @@ async function fetchCatalog(sourceId, options = {}) {
     });
 
     const now = new Date().toISOString();
-    const nextRefresh = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const nextRefresh = computeNextRefresh();
     const meta = {
         version: 1,
         sourceId,

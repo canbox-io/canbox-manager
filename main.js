@@ -3046,7 +3046,8 @@ app.whenReady().then(() => {
     }, 30000);
 
     // 启动 30s 后后台预热内置 Catalog 源，并按 nextRefresh 定期刷新（不阻塞启动、失败静默）
-    const CATALOG_REFRESH_CHECK_INTERVAL = 30 * 60 * 1000;
+    // tick 只读本地 meta；真正的网络检查由 nextRefresh 控制（10 分钟级，条件请求）
+    const CATALOG_REFRESH_CHECK_INTERVAL = 5 * 60 * 1000;
 
     function refreshDueCatalogs() {
         try {
@@ -3054,13 +3055,28 @@ app.whenReady().then(() => {
                 const meta = catalogManager.readCacheMeta(source.id);
                 // 无缓存元信息，或已到 nextRefresh 时间点，才触发刷新；
                 // 拉取失败时不会写入新 meta，nextRefresh 仍为过去时间，下一轮会自动重试
-                const due = !meta || !meta.nextRefresh || Date.now() >= Date.parse(meta.nextRefresh);
+                // 兼容旧版本写入的 24 小时周期：跨度明显偏大时立即刷新一次，把 meta 改写为新周期
+                const span = meta && meta.lastRefresh && meta.nextRefresh
+                    ? Date.parse(meta.nextRefresh) - Date.parse(meta.lastRefresh)
+                    : Infinity;
+                const legacyLongInterval = span > 60 * 60 * 1000;
+                const due = legacyLongInterval || !meta || !meta.nextRefresh || Date.now() >= Date.parse(meta.nextRefresh);
                 if (!due) continue;
                 catalogManager.fetchCatalog(source.id, { force: false })
                     .then(result => {
-                        if (result && result.success && !result.fromCache &&
-                            mainWindow && !mainWindow.isDestroyed()) {
+                        if (!result || !result.success) return;
+                        // catalog 未变化（304）时不打扰渲染层
+                        if (!result.catalogUnchanged && mainWindow && !mainWindow.isDestroyed()) {
                             mainWindow.webContents.send('manager.catalog.updated', { sourceId: source.id });
+                        }
+                        // 目录有新内容时，立即复查已安装应用是否有更新
+                        if (!result.catalogUnchanged) {
+                            checkAllAppUpdates().then(r => {
+                                const count = (r && r.updates && r.updates.length) || 0;
+                                if (count > 0 && mainWindow && !mainWindow.isDestroyed()) {
+                                    mainWindow.webContents.send('manager.apps.updatesAvailable', r.updates);
+                                }
+                            }).catch(() => {});
                         }
                     })
                     .catch(() => {});
