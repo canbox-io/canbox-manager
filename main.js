@@ -1090,6 +1090,13 @@ let panelOpen = false;
 const PANEL_WIDTH = 380;
 const PANEL_HEIGHT = 460;
 
+// 可拖动的下载浮动按钮
+const FAB_SIZE = 56;
+let fabView = null;
+let fabVisible = false;
+let fabPos = null;
+let fabDragStart = null;
+
 // 窗口状态文件
 const stateFile = path.join(app.getPath('userData'), 'window-state.json');
 
@@ -1152,6 +1159,8 @@ function layoutViews() {
         win.contentView.addChildView(panelView);
         panelView.setBounds(panelBounds());
     }
+    // 浮动按钮再叠在面板之上，保证随时可点击
+    layoutFab();
 }
 
 function activeIndex() { return tabs.findIndex(t => t.id === activeTabId); }
@@ -1252,6 +1261,10 @@ function broadcastDownloads() {
     if (panelOpen && panelView && !panelView.webContents.isDestroyed()) {
         panelView.webContents.send('downloads:update', list);
     }
+    if (fabVisible && fabView && !fabView.webContents.isDestroyed()) {
+        fabView.webContents.send('downloads:update', list);
+    }
+    syncFabVisibility();
 }
 
 function updateTaskbarProgress() {
@@ -1337,11 +1350,23 @@ function setupDownloads(ses) {
 
 // ====== 下载面板 ======
 
+// 面板尺寸随页面缩放比例（_zoom）同步放大/缩小
 function panelBounds() {
+    const z = Math.max(0.5, Math.min(2.5, _zoom || 1));
     const size = win.getContentSize();
     const top = tabs.length > 1 ? TAB_BAR_HEIGHT : 0;
-    const width = Math.min(PANEL_WIDTH, size[0] - 16);
-    const height = Math.min(PANEL_HEIGHT, size[1] - top - 16);
+    const width = Math.min(Math.round(PANEL_WIDTH * z), size[0] - 16);
+    const height = Math.min(Math.round(PANEL_HEIGHT * z), size[1] - top - 16);
+
+    // 有浮动按钮时，面板贴着按钮展开（优先在按钮上方，空间不足则放下方）
+    if (fabVisible && fabPos) {
+        let x = fabPos.x + FAB_SIZE - width;
+        let y = fabPos.y - height - 8;
+        if (y < top + 8) y = fabPos.y + FAB_SIZE + 8;
+        x = Math.max(8, Math.min(size[0] - width - 8, x));
+        y = Math.max(top + 8, Math.min(size[1] - height - 8, y));
+        return { x: Math.round(x), y: Math.round(y), width, height };
+    }
     return { x: size[0] - width - 8, y: top + 8, width, height };
 }
 
@@ -1362,12 +1387,14 @@ function showPanel() {
         panelView.webContents.loadFile(path.join(__dirname, 'downloads.html'));
     }
     panelOpen = true;
+    panelView.webContents.setZoomFactor(Math.max(0.5, Math.min(2.5, _zoom || 1)));
     win.contentView.removeChildView(panelView);
     win.contentView.addChildView(panelView);
     panelView.setBounds(panelBounds());
     if (!panelView.webContents.isDestroyed()) {
         panelView.webContents.send('downloads:update', listDownloads());
     }
+    layoutFab();
 }
 
 function hidePanel() {
@@ -1378,6 +1405,92 @@ function hidePanel() {
 }
 
 function togglePanel() { if (panelOpen) hidePanel(); else showPanel(); }
+
+// 页面缩放变化时，让面板跟随（内容缩放 + 外框尺寸同步）
+function syncPanelZoom() {
+    if (!panelOpen || !panelView || panelView.webContents.isDestroyed()) return;
+    panelView.webContents.setZoomFactor(Math.max(0.5, Math.min(2.5, _zoom || 1)));
+    panelView.setBounds(panelBounds());
+}
+
+// ====== 可拖动的下载浮动按钮 ======
+
+function fabDefaultPos() {
+    const size = win.getContentSize();
+    return { x: size[0] - FAB_SIZE - 20, y: size[1] - FAB_SIZE - 20 };
+}
+
+function clampFab(pos) {
+    const size = win.getContentSize();
+    return {
+        x: Math.max(4, Math.min(size[0] - FAB_SIZE - 4, Math.round(pos.x))),
+        y: Math.max(4, Math.min(size[1] - FAB_SIZE - 4, Math.round(pos.y)))
+    };
+}
+
+function ensureFabView() {
+    if (fabView && !fabView.webContents.isDestroyed()) return fabView;
+    fabView = new WebContentsView({
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+    fabView.setBackgroundColor('#00000000');
+    fabView.webContents.loadFile(path.join(__dirname, 'fab.html'));
+    return fabView;
+}
+
+function layoutFab() {
+    if (!fabVisible || !fabView || fabView.webContents.isDestroyed() || !win || win.isDestroyed()) return;
+    if (!fabPos) fabPos = fabDefaultPos();
+    fabPos = clampFab(fabPos);
+    win.contentView.removeChildView(fabView);
+    win.contentView.addChildView(fabView);
+    fabView.setBounds({ x: fabPos.x, y: fabPos.y, width: FAB_SIZE, height: FAB_SIZE });
+}
+
+function showFab() {
+    if (!win || win.isDestroyed()) return;
+    ensureFabView();
+    fabVisible = true;
+    layoutFab();
+}
+
+function hideFab() {
+    fabVisible = false;
+    if (fabView && win && !win.isDestroyed()) {
+        try { win.contentView.removeChildView(fabView); } catch (e) {}
+    }
+}
+
+// 有下载记录（进行中或已完成）时才显示浮动按钮；没有下载时同时收起面板
+function syncFabVisibility() {
+    if (downloads.size > 0) {
+        showFab();
+    } else {
+        hideFab();
+        if (panelOpen) hidePanel();
+    }
+}
+
+ipcMain.on('fab:drag-start', () => {
+    if (!fabVisible) return;
+    fabDragStart = fabPos ? { x: fabPos.x, y: fabPos.y } : null;
+});
+
+ipcMain.on('fab:drag-move', (_e, dx, dy) => {
+    if (!fabDragStart || !fabView || fabView.webContents.isDestroyed()) return;
+    fabPos = clampFab({ x: fabDragStart.x + Number(dx || 0), y: fabDragStart.y + Number(dy || 0) });
+    fabView.setBounds({ x: fabPos.x, y: fabPos.y, width: FAB_SIZE, height: FAB_SIZE });
+    // 面板跟着按钮走
+    if (panelOpen && panelView && !panelView.webContents.isDestroyed()) {
+        panelView.setBounds(panelBounds());
+    }
+});
+
+ipcMain.on('fab:drag-end', () => { fabDragStart = null; });
 
 ipcMain.handle('downloads:get', () => listDownloads());
 ipcMain.handle('downloads:toggle-panel', () => { togglePanel(); return panelOpen; });
@@ -1459,6 +1572,7 @@ function adjustZoom(delta) {
     if (!t) return;
     _zoom = Math.max(0.5, Math.min(2.5, Math.round((_zoom + delta) * 10) / 10));
     t.view.webContents.setZoomFactor(_zoom);
+    syncPanelZoom();
 }
 
 // 统一快捷键处理
@@ -1483,7 +1597,7 @@ function handleShortcut(e, input) {
     if (ctrl && code === 'Minus') { adjustZoom(-0.1); e.preventDefault(); return; }
     if (ctrl && (code === 'Digit0' || code === 'Numpad0')) {
         const t = tabs.find(x => x.id === activeTabId);
-        if (t) t.view.webContents.setZoomFactor(1.0);
+        if (t) { _zoom = 1.0; t.view.webContents.setZoomFactor(1.0); syncPanelZoom(); }
         e.preventDefault(); return;
     }
     if (code === 'F12') {
@@ -1574,27 +1688,11 @@ function renderWebAppTabbarHtml() {
   }
   .tab-bar {
     display: flex; align-items: flex-end;
-    height: 52.5px; padding: 0 48px 0 8px; gap: 2px;
+    height: 52.5px; padding: 0 8px; gap: 2px;
     background: #e4e7ed;
     overflow: hidden;
     position: relative;
   }
-  .dl-btn {
-    position: absolute; right: 8px; top: 11px;
-    width: 30px; height: 30px;
-    display: flex; align-items: center; justify-content: center;
-    border: none; border-radius: 6px;
-    background: transparent; color: #606266;
-    cursor: pointer; overflow: visible;
-  }
-  .dl-btn:hover { background: #dcdfe6; color: #303133; }
-  .dl-badge {
-    position: absolute; top: -3px; right: -3px;
-    min-width: 14px; height: 14px; padding: 0 3px;
-    border-radius: 7px; background: #409eff; color: #fff;
-    font-size: 9px; font-weight: 600; line-height: 14px; text-align: center;
-  }
-  .dl-badge.hidden { display: none; }
   .tab-bar.hidden { display: none; }
   .tab {
     display: flex; align-items: center; gap: 8px;
@@ -1653,21 +1751,12 @@ function renderWebAppTabbarHtml() {
 </style>
 </head>
 <body>
-  <div class="tab-bar hidden" id="tabBar">
-    <button class="dl-btn" id="dlBtn" title="下载内容 (Ctrl+J)">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M8 2v7.5"/><path d="M4.8 6.6 8 9.8l3.2-3.2"/><path d="M2.5 13.5h11"/>
-      </svg>
-      <span class="dl-badge hidden" id="dlBadge"></span>
-    </button>
-  </div>
+  <div class="tab-bar hidden" id="tabBar"></div>
   <div class="content-placeholder" id="placeholder">内容区</div>
 <script>
   let tabList = [];
   const tabBar = document.getElementById('tabBar');
   const placeholder = document.getElementById('placeholder');
-  const dlBtn = document.getElementById('dlBtn');
-  const dlBadge = document.getElementById('dlBadge');
 
   function renderTabs() {
     tabBar.querySelectorAll('.tab').forEach(el => el.remove());
@@ -1697,18 +1786,6 @@ function renderWebAppTabbarHtml() {
     window.tabs.onUpdate((list) => { tabList = list; renderTabs(); });
     window.tabs.get().then((list) => { tabList = list; renderTabs(); }).catch(() => {});
   }
-
-  // 下载按钮与角标（仅统计进行中的下载）
-  function updateDownloads(list) {
-    const active = (list || []).filter(d => d.state === 'progressing' || d.state === 'interrupted').length;
-    dlBadge.textContent = active > 0 ? String(active) : '';
-    dlBadge.classList.toggle('hidden', active === 0);
-  }
-  if (window.downloads) {
-    dlBtn.addEventListener('click', () => window.downloads.toggle());
-    window.downloads.onUpdate(updateDownloads);
-    window.downloads.get().then(updateDownloads).catch(() => {});
-  }
 </script>
 </body>
 </html>
@@ -1736,6 +1813,129 @@ contextBridge.exposeInMainWorld('downloads', {
     clearDone: () => ipcRenderer.invoke('downloads:clear-done'),
     onUpdate: (cb) => ipcRenderer.on('downloads:update', (_e, list) => cb(list))
 });
+
+contextBridge.exposeInMainWorld('fab', {
+    dragStart: () => ipcRenderer.send('fab:drag-start'),
+    dragMove: (dx, dy) => ipcRenderer.send('fab:drag-move', dx, dy),
+    dragEnd: () => ipcRenderer.send('fab:drag-end')
+});
+`;
+}
+
+/**
+ * 渲染下载浮动按钮 HTML（可拖动的小圆形按钮，独立 WebContentsView）
+ */
+function renderWebAppFabHtml() {
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent; overflow: hidden; user-select: none;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .fab {
+    position: relative; width: 46px; height: 46px; margin: 5px;
+    border-radius: 50%; background: #ffffff; color: #409eff;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+    cursor: pointer; transition: transform .12s;
+  }
+  .fab:hover { transform: scale(1.06); }
+  .fab.dragging { cursor: grabbing; transform: scale(1.06); transition: none; }
+  .ring {
+    position: absolute; inset: -3px; border-radius: 50%;
+    background: conic-gradient(#409eff calc(var(--p, 0) * 1%), #e4e7ed 0);
+    display: none;
+  }
+  .ring::after {
+    content: ''; position: absolute; inset: 3px;
+    border-radius: 50%; background: #ffffff;
+  }
+  .fab.running .ring { display: block; }
+  .fab svg, .badge { position: relative; z-index: 1; }
+  .badge {
+    position: absolute; top: -4px; right: -4px;
+    min-width: 16px; height: 16px; padding: 0 4px;
+    border-radius: 8px; background: #409eff; color: #ffffff;
+    font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
+  }
+  .badge.hidden { display: none; }
+</style>
+</head>
+<body>
+  <div class="fab" id="fabEl" title="下载内容">
+    <div class="ring" id="ring"></div>
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none"
+         stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2v7.5"/><path d="M4.8 6.6 8 9.8l3.2-3.2"/><path d="M2.5 13.5h11"/>
+    </svg>
+    <span class="badge hidden" id="badge"></span>
+  </div>
+<script>
+  var fabEl = document.getElementById('fabEl');
+  var badge = document.getElementById('badge');
+  var ring = document.getElementById('ring');
+  var startX = 0, startY = 0, dragging = false, moved = false;
+
+  function update(list) {
+    list = list || [];
+    var active = list.filter(function (d) {
+      return d.state === 'progressing' || d.state === 'interrupted';
+    });
+    badge.textContent = active.length > 0 ? String(active.length) : '';
+    badge.classList.toggle('hidden', active.length === 0);
+    fabEl.classList.toggle('running', active.length > 0);
+    var received = 0, total = 0;
+    active.forEach(function (d) {
+      received += d.receivedBytes || 0;
+      total += d.totalBytes || 0;
+    });
+    var pct = total > 0 ? Math.min(100, received * 100 / total) : 0;
+    ring.style.setProperty('--p', String(pct));
+  }
+
+  fabEl.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return;
+    dragging = true;
+    moved = false;
+    startX = e.screenX;
+    startY = e.screenY;
+    fabEl.classList.add('dragging');
+    try { fabEl.setPointerCapture(e.pointerId); } catch (err) {}
+    if (window.fab) window.fab.dragStart();
+    e.preventDefault();
+  });
+
+  fabEl.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var dx = e.screenX - startX;
+    var dy = e.screenY - startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+    if (window.fab) window.fab.dragMove(dx, dy);
+  });
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    fabEl.classList.remove('dragging');
+    if (window.fab) window.fab.dragEnd();
+    if (!moved && window.downloads) window.downloads.toggle();
+  }
+  fabEl.addEventListener('pointerup', endDrag);
+  fabEl.addEventListener('pointercancel', endDrag);
+  window.addEventListener('blur', endDrag);
+
+  if (window.downloads) {
+    window.downloads.onUpdate(update);
+    window.downloads.get().then(update).catch(function () {});
+  }
+</script>
+</body>
+</html>
 `;
 }
 
@@ -1982,6 +2182,9 @@ function buildWebAppSources(appId, config) {
     // downloads.html（下载面板）
     fs.writeFileSync(path.join(stagingDir, 'downloads.html'), renderWebAppDownloadsHtml(), 'utf-8');
 
+    // fab.html（可拖动的下载浮动按钮）
+    fs.writeFileSync(path.join(stagingDir, 'fab.html'), renderWebAppFabHtml(), 'utf-8');
+
     return { stagingDir, pkgContent };
 }
 
@@ -2146,7 +2349,7 @@ async function editWebApp(appId, config) {
 
         // 清理旧实现遗留的散落源码文件（旧版本直接写在 apps/{appId}/ 根目录，现已收进 app.asar）
         const originalFs = require('original-fs');
-        for (const name of ['main.js', 'tabbar.html', 'preload.js', 'downloads.html']) {
+        for (const name of ['main.js', 'tabbar.html', 'preload.js', 'downloads.html', 'fab.html']) {
             const loosePath = path.join(destPath, name);
             if (originalFs.existsSync(loosePath)) {
                 originalFs.rmSync(loosePath, { force: true });
