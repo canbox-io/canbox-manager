@@ -1409,6 +1409,7 @@ function renderWebAppTabbarHtml() {
       const closeBtn = t.pinned ? '' : '<button class="tab-close">×</button>';
       el.innerHTML = dot + '<span class="tab-title"></span>' + closeBtn;
       el.querySelector('.tab-title').textContent = t.title || t.url;
+      el.title = t.title || t.url;
       el.addEventListener('click', (e) => {
         if (e.target.classList.contains('tab-close')) return;
         window.tabs.switch(t.id);
