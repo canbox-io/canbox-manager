@@ -1025,6 +1025,8 @@ function renderWebAppMainJs(config) {
         {
             label: '文件',
             submenu: [
+                { label: '下载', accelerator: 'Control+J', click: () => { togglePanel(); } },
+                { type: 'separator' },
                 { role: 'quit', label: '退出' },
                 { role: 'reload', label: '刷新' }
             ]
@@ -1061,7 +1063,7 @@ function renderWebAppMainJs(config) {
 
     return `// 自动生成的 Canbox 网页应用 main.js（多标签页架构）
 // 由 canbox-manager web-app-creator 生成
-const { app, BrowserWindow, WebContentsView, Menu, screen, ipcMain } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, screen, ipcMain, shell, Notification, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -1076,6 +1078,17 @@ const tabs = [];
 let tabIdSeq = 0;
 let activeTabId = null;
 let rendererReady = false;
+
+// window.open 产生的“待定窗口”：加载出文档后才转为标签页；若是下载则保持隐藏
+const pendingPopups = new Map();
+
+// 下载管理
+const downloads = new Map();
+let downloadSeq = 0;
+let panelView = null;
+let panelOpen = false;
+const PANEL_WIDTH = 380;
+const PANEL_HEIGHT = 460;
 
 // 窗口状态文件
 const stateFile = path.join(app.getPath('userData'), 'window-state.json');
@@ -1133,43 +1146,269 @@ function layoutViews() {
             t.view.setBounds({ x: -99999, y: -99999, width: 100, height: 100 });
         }
     }
+    // 下载面板始终位于最上层（切换/新建标签页会把页面视图提到前面）
+    if (panelOpen && panelView && !panelView.webContents.isDestroyed()) {
+        win.contentView.removeChildView(panelView);
+        win.contentView.addChildView(panelView);
+        panelView.setBounds(panelBounds());
+    }
 }
 
 function activeIndex() { return tabs.findIndex(t => t.id === activeTabId); }
 
-function createTab(url, activate = true, pinned = false) {
-    const id = ++tabIdSeq;
+function createView() {
     const view = new WebContentsView({
         webPreferences: { nodeIntegration: false, contextIsolation: true }
     });
     view.webContents.setUserAgent(CHROME_UA);
 
-    // 拦截新窗口：改为在 APP 内新开 tab
-    view.webContents.setWindowOpenHandler(({ url: newUrl }) => {
-        createTab(newUrl, true, false);
-        return { action: 'deny' };
-    });
-
-    view.webContents.on('page-title-updated', (_e, title) => {
-        const t = tabs.find(x => x.id === id);
-        if (t) { t.title = title || t.url; sendTabs(); }
-    });
-    view.webContents.on('did-navigate', (_e, navUrl) => {
-        const t = tabs.find(x => x.id === id);
-        if (t) { t.url = navUrl; sendTabs(); }
-    });
-
-    view.webContents.loadURL(url);
-    win.contentView.addChildView(view);
-    tabs.push({ id, title: url, url, view, pinned });
-
     // 每个 WebContentsView 都监听快捷键（焦点在页面内时事件不经过主窗口）
     view.webContents.on('before-input-event', (e, input) => handleShortcut(e, input));
 
-    if (activate) { activeTabId = id; layoutViews(); }
+    // 拦截新窗口：可能是普通弹窗，也可能是直接触发下载的链接
+    view.webContents.setWindowOpenHandler(({ url: newUrl }) => {
+        openPopup(newUrl);
+        return { action: 'deny' };
+    });
+    return view;
+}
+
+// 把已加载的 WebContentsView 登记为标签页
+function attachTab(view, url, activate, pinned, fromWindowOpen) {
+    const id = ++tabIdSeq;
+    const tab = { id, title: url, url, view, pinned, fromWindowOpen: !!fromWindowOpen };
+    view.webContents.on('page-title-updated', (_e, title) => {
+        tab.title = title || tab.url;
+        sendTabs();
+    });
+    view.webContents.on('did-navigate', (_e, navUrl) => {
+        tab.url = navUrl;
+        sendTabs();
+    });
+    win.contentView.addChildView(view);
+    tabs.push(tab);
+    if (activate) activeTabId = id;
+    layoutViews();
     sendTabs();
     return id;
 }
+
+function createTab(url, activate = true, pinned = false) {
+    const view = createView();
+    const id = attachTab(view, url, activate, pinned, false);
+    view.webContents.loadURL(url);
+    return id;
+}
+
+// window.open / target=_blank 打开的新窗口：
+// 先作为“待定窗口”加载，等页面真正渲染出文档后才转为标签页；
+// 若它其实是下载链接（不会渲染文档），则始终保持隐藏，不产生残留标签页。
+function openPopup(url) {
+    const target = url || 'about:blank';
+    const view = createView();
+    const wcId = view.webContents.id;
+    const entry = { view, url: target, timer: null, settled: false };
+    const adopt = () => {
+        if (entry.settled) return;
+        entry.settled = true;
+        if (entry.timer) clearTimeout(entry.timer);
+        pendingPopups.delete(wcId);
+        if (view.webContents.isDestroyed()) return;
+        attachTab(view, view.webContents.getURL() || target, true, false, true);
+    };
+    pendingPopups.set(wcId, entry);
+
+    view.webContents.once('did-finish-load', adopt);
+    view.webContents.once('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
+        if (isMainFrame && code !== -3) adopt();
+    });
+    // 兜底：超过 1.5s 仍未渲染出文档的弹窗，也显示出来
+    entry.timer = setTimeout(adopt, 1500);
+    view.webContents.once('destroyed', () => {
+        if (entry.timer) clearTimeout(entry.timer);
+        pendingPopups.delete(wcId);
+    });
+    view.webContents.loadURL(target).catch(() => {});
+}
+
+// ====== 下载管理 ======
+
+function listDownloads() {
+    return Array.from(downloads.values()).map((d) => ({
+        id: d.id,
+        filename: d.filename,
+        state: d.state,
+        receivedBytes: d.receivedBytes,
+        totalBytes: d.totalBytes,
+        savePath: d.savePath,
+        paused: d.paused,
+        speed: d.speed
+    })).reverse();
+}
+
+function broadcastDownloads() {
+    const list = listDownloads();
+    if (win && !win.isDestroyed() && rendererReady) win.webContents.send('downloads:update', list);
+    if (panelOpen && panelView && !panelView.webContents.isDestroyed()) {
+        panelView.webContents.send('downloads:update', list);
+    }
+}
+
+function updateTaskbarProgress() {
+    if (!win || win.isDestroyed()) return;
+    const active = Array.from(downloads.values()).filter((d) => d.state === 'progressing' || d.state === 'interrupted');
+    if (active.length === 0) { win.setProgressBar(-1); return; }
+    let received = 0;
+    let total = 0;
+    for (const d of active) { received += d.receivedBytes; total += d.totalBytes; }
+    win.setProgressBar(total > 0 ? Math.min(1, received / total) : 2);
+}
+
+function notifyDownloadDone(d) {
+    if (!Notification.isSupported()) return;
+    try {
+        const n = new Notification({ title: '下载完成', body: d.filename });
+        n.on('click', () => { if (d.savePath) shell.showItemInFolder(d.savePath); });
+        n.show();
+    } catch (e) {}
+}
+
+function setupDownloads(ses) {
+    ses.on('will-download', (_event, item, wc) => {
+        // window.open 触发的下载：隐藏窗口不转为标签页，下载结束后销毁
+        const pending = wc ? pendingPopups.get(wc.id) : null;
+        if (pending) {
+            pending.settled = true;
+            if (pending.timer) clearTimeout(pending.timer);
+            pendingPopups.delete(wc.id);
+            item.once('done', () => {
+                try {
+                    if (!pending.view.webContents.isDestroyed()) pending.view.webContents.destroy();
+                } catch (e) {}
+            });
+        }
+
+        const d = {
+            id: String(++downloadSeq),
+            item,
+            filename: item.getFilename(),
+            state: 'progressing',
+            receivedBytes: item.getReceivedBytes(),
+            totalBytes: item.getTotalBytes(),
+            savePath: item.getSavePath() || '',
+            paused: false,
+            speed: 0,
+            lastBytes: item.getReceivedBytes(),
+            lastTime: Date.now()
+        };
+        downloads.set(d.id, d);
+        broadcastDownloads();
+        if (!panelOpen) showPanel();
+
+        item.on('updated', (_e, state) => {
+            const now = Date.now();
+            const elapsed = (now - d.lastTime) / 1000;
+            if (elapsed >= 0.5) {
+                d.speed = Math.max(0, (item.getReceivedBytes() - d.lastBytes) / elapsed);
+                d.lastBytes = item.getReceivedBytes();
+                d.lastTime = now;
+            }
+            d.state = state;
+            d.receivedBytes = item.getReceivedBytes();
+            d.totalBytes = item.getTotalBytes();
+            d.savePath = item.getSavePath() || d.savePath;
+            d.paused = item.isPaused();
+            broadcastDownloads();
+            updateTaskbarProgress();
+        });
+
+        item.once('done', (_e, state) => {
+            d.state = state;
+            d.savePath = item.getSavePath() || d.savePath;
+            d.receivedBytes = item.getReceivedBytes();
+            if (item.getTotalBytes() > 0) d.totalBytes = item.getTotalBytes();
+            d.speed = 0;
+            broadcastDownloads();
+            updateTaskbarProgress();
+            if (state === 'completed') notifyDownloadDone(d);
+        });
+    });
+}
+
+// ====== 下载面板 ======
+
+function panelBounds() {
+    const size = win.getContentSize();
+    const top = tabs.length > 1 ? TAB_BAR_HEIGHT : 0;
+    const width = Math.min(PANEL_WIDTH, size[0] - 16);
+    const height = Math.min(PANEL_HEIGHT, size[1] - top - 16);
+    return { x: size[0] - width - 8, y: top + 8, width, height };
+}
+
+function showPanel() {
+    if (!win || win.isDestroyed()) return;
+    if (!panelView || panelView.webContents.isDestroyed()) {
+        panelView = new WebContentsView({
+            webPreferences: {
+                preload: path.join(__dirname, 'preload.js'),
+                nodeIntegration: false,
+                contextIsolation: true
+            }
+        });
+        panelView.setBackgroundColor('#00000000');
+        panelView.webContents.on('before-input-event', (e, input) => {
+            if (input.type === 'keyDown' && input.key === 'Escape') { hidePanel(); e.preventDefault(); }
+        });
+        panelView.webContents.loadFile(path.join(__dirname, 'downloads.html'));
+    }
+    panelOpen = true;
+    win.contentView.removeChildView(panelView);
+    win.contentView.addChildView(panelView);
+    panelView.setBounds(panelBounds());
+    if (!panelView.webContents.isDestroyed()) {
+        panelView.webContents.send('downloads:update', listDownloads());
+    }
+}
+
+function hidePanel() {
+    panelOpen = false;
+    if (panelView && win && !win.isDestroyed()) {
+        try { win.contentView.removeChildView(panelView); } catch (e) {}
+    }
+}
+
+function togglePanel() { if (panelOpen) hidePanel(); else showPanel(); }
+
+ipcMain.handle('downloads:get', () => listDownloads());
+ipcMain.handle('downloads:toggle-panel', () => { togglePanel(); return panelOpen; });
+ipcMain.handle('downloads:hide-panel', () => { hidePanel(); });
+ipcMain.handle('downloads:action', (_e, id, action) => {
+    const d = downloads.get(String(id));
+    if (!d) return false;
+    const item = d.item;
+    try {
+        if (action === 'cancel') item.cancel();
+        else if (action === 'pause') { if (item.getState() === 'progressing') item.pause(); }
+        else if (action === 'resume') { if (item.canResume()) item.resume(); }
+        else if (action === 'open-folder') { if (d.savePath) shell.showItemInFolder(d.savePath); }
+        else if (action === 'open-file') { if (d.savePath) shell.openPath(d.savePath); }
+        else if (action === 'remove') {
+            if (d.state === 'progressing' || d.state === 'interrupted') item.cancel();
+            downloads.delete(d.id);
+            broadcastDownloads();
+        } else {
+            return false;
+        }
+    } catch (e) { return false; }
+    return true;
+});
+ipcMain.handle('downloads:clear-done', () => {
+    for (const d of Array.from(downloads.values())) {
+        if (d.state === 'progressing' || d.state === 'interrupted') continue;
+        downloads.delete(d.id);
+    }
+    broadcastDownloads();
+});
 
 function switchTab(id) {
     if (!tabs.find(t => t.id === id)) return;
@@ -1232,6 +1471,7 @@ function handleShortcut(e, input) {
 
     if (ctrl && !shift && !alt && code === 'KeyW') { e.preventDefault(); closeTab(activeTabId); return; }
     if (ctrl && !shift && !alt && code === 'KeyQ') { e.preventDefault(); win.close(); return; }
+    if (ctrl && !shift && !alt && code === 'KeyJ') { e.preventDefault(); togglePanel(); return; }
     if (ctrl && !shift && code === 'Tab') { e.preventDefault(); switchAdjacent(1); return; }
     if (ctrl && !shift && code === 'PageDown') { e.preventDefault(); switchAdjacent(1); return; }
     if (ctrl && shift && code === 'Tab') { e.preventDefault(); switchAdjacent(-1); return; }
@@ -1285,6 +1525,9 @@ app.whenReady().then(() => {
     if (savedState && savedState.isMaximized) win.maximize();
     if (savedState && savedState.isFullScreen) win.setFullScreen(true);
 
+    // 下载统一走 will-download：默认仍由 Electron 弹保存对话框选择路径
+    setupDownloads(session.defaultSession);
+
     win.webContents.on('before-input-event', (e, input) => handleShortcut(e, input));
     win.loadFile(path.join(__dirname, 'tabbar.html'));
     win.on('resize', layoutViews);
@@ -1331,10 +1574,27 @@ function renderWebAppTabbarHtml() {
   }
   .tab-bar {
     display: flex; align-items: flex-end;
-    height: 52.5px; padding: 0 8px; gap: 2px;
+    height: 52.5px; padding: 0 48px 0 8px; gap: 2px;
     background: #e4e7ed;
     overflow: hidden;
+    position: relative;
   }
+  .dl-btn {
+    position: absolute; right: 8px; top: 11px;
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 6px;
+    background: transparent; color: #606266;
+    cursor: pointer; overflow: visible;
+  }
+  .dl-btn:hover { background: #dcdfe6; color: #303133; }
+  .dl-badge {
+    position: absolute; top: -3px; right: -3px;
+    min-width: 14px; height: 14px; padding: 0 3px;
+    border-radius: 7px; background: #409eff; color: #fff;
+    font-size: 9px; font-weight: 600; line-height: 14px; text-align: center;
+  }
+  .dl-badge.hidden { display: none; }
   .tab-bar.hidden { display: none; }
   .tab {
     display: flex; align-items: center; gap: 8px;
@@ -1393,12 +1653,21 @@ function renderWebAppTabbarHtml() {
 </style>
 </head>
 <body>
-  <div class="tab-bar hidden" id="tabBar"></div>
+  <div class="tab-bar hidden" id="tabBar">
+    <button class="dl-btn" id="dlBtn" title="下载内容 (Ctrl+J)">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2v7.5"/><path d="M4.8 6.6 8 9.8l3.2-3.2"/><path d="M2.5 13.5h11"/>
+      </svg>
+      <span class="dl-badge hidden" id="dlBadge"></span>
+    </button>
+  </div>
   <div class="content-placeholder" id="placeholder">内容区</div>
 <script>
   let tabList = [];
   const tabBar = document.getElementById('tabBar');
   const placeholder = document.getElementById('placeholder');
+  const dlBtn = document.getElementById('dlBtn');
+  const dlBadge = document.getElementById('dlBadge');
 
   function renderTabs() {
     tabBar.querySelectorAll('.tab').forEach(el => el.remove());
@@ -1428,6 +1697,18 @@ function renderWebAppTabbarHtml() {
     window.tabs.onUpdate((list) => { tabList = list; renderTabs(); });
     window.tabs.get().then((list) => { tabList = list; renderTabs(); }).catch(() => {});
   }
+
+  // 下载按钮与角标（仅统计进行中的下载）
+  function updateDownloads(list) {
+    const active = (list || []).filter(d => d.state === 'progressing' || d.state === 'interrupted').length;
+    dlBadge.textContent = active > 0 ? String(active) : '';
+    dlBadge.classList.toggle('hidden', active === 0);
+  }
+  if (window.downloads) {
+    dlBtn.addEventListener('click', () => window.downloads.toggle());
+    window.downloads.onUpdate(updateDownloads);
+    window.downloads.get().then(updateDownloads).catch(() => {});
+  }
 </script>
 </body>
 </html>
@@ -1446,6 +1727,197 @@ contextBridge.exposeInMainWorld('tabs', {
     close: (id) => ipcRenderer.invoke('tab:close', id),
     onUpdate: (cb) => ipcRenderer.on('tabs:update', (_e, tabs) => cb(tabs))
 });
+
+contextBridge.exposeInMainWorld('downloads', {
+    get: () => ipcRenderer.invoke('downloads:get'),
+    toggle: () => ipcRenderer.invoke('downloads:toggle-panel'),
+    hide: () => ipcRenderer.invoke('downloads:hide-panel'),
+    action: (id, action) => ipcRenderer.invoke('downloads:action', id, action),
+    clearDone: () => ipcRenderer.invoke('downloads:clear-done'),
+    onUpdate: (cb) => ipcRenderer.on('downloads:update', (_e, list) => cb(list))
+});
+`;
+}
+
+/**
+ * 渲染下载面板 HTML（独立 WebContentsView，浮在当前标签页之上）
+ */
+function renderWebAppDownloadsHtml() {
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; background: transparent; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #303133; user-select: none;
+  }
+  .panel {
+    height: 100%; display: flex; flex-direction: column;
+    background: #ffffff; border: 1px solid #dcdfe6; border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .18); overflow: hidden;
+  }
+  .panel-head {
+    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+    height: 42px; padding: 0 12px; border-bottom: 1px solid #ebeef5;
+  }
+  .panel-title { font-size: 13px; font-weight: 600; }
+  .head-actions { display: flex; align-items: center; gap: 4px; }
+  .link {
+    border: none; background: transparent; color: #409eff;
+    font-size: 12px; padding: 4px 6px; border-radius: 4px; cursor: pointer;
+  }
+  .link:hover { background: #ecf5ff; }
+  .icon-btn {
+    border: none; background: transparent; color: #909399;
+    width: 24px; height: 24px; font-size: 16px; line-height: 1;
+    border-radius: 4px; cursor: pointer;
+  }
+  .icon-btn:hover { background: #f0f2f5; color: #303133; }
+  .panel-body { flex: 1; overflow-y: auto; }
+  .item { padding: 10px 12px; border-bottom: 1px solid #f5f7fa; }
+  .item:last-child { border-bottom: none; }
+  .name {
+    font-size: 12.5px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar {
+    height: 4px; margin: 8px 0 6px;
+    border-radius: 2px; background: #ebeef5; overflow: hidden;
+  }
+  .bar i {
+    display: block; height: 100%; width: 0;
+    background: #409eff; border-radius: 2px;
+    transition: width .2s linear;
+  }
+  .bar i.done { background: #67c23a; }
+  .bar i.fail { background: #c0c4cc; }
+  .meta { font-size: 11px; color: #909399; }
+  .ops { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+  .op {
+    border: 1px solid #dcdfe6; background: #fff; color: #606266;
+    font-size: 11.5px; padding: 3px 8px; border-radius: 4px; cursor: pointer;
+  }
+  .op:hover { color: #409eff; border-color: #c6e2ff; background: #ecf5ff; }
+  .op.primary { color: #409eff; border-color: #c6e2ff; background: #ecf5ff; }
+  .empty { display: flex; flex: 1; align-items: center; justify-content: center; color: #c0c4cc; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title">下载内容</span>
+      <div class="head-actions">
+        <button class="link" id="clearBtn">清除已结束</button>
+        <button class="icon-btn" id="closeBtn" title="关闭">×</button>
+      </div>
+    </div>
+    <div class="panel-body" id="list"></div>
+    <div class="empty" id="empty">暂无下载内容</div>
+  </div>
+<script>
+  var items = [];
+  var listEl = document.getElementById('list');
+  var emptyEl = document.getElementById('empty');
+
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n <= 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = 0;
+    var v = n;
+    while (v >= 1024 && i < units.length - 1) { v = v / 1024; i++; }
+    return (i === 0 ? v.toFixed(0) : v.toFixed(1)) + ' ' + units[i];
+  }
+
+  function isActive(d) { return d.state === 'progressing' || d.state === 'interrupted'; }
+
+  function statusText(d) {
+    if (d.state === 'completed') return '已完成 · ' + fmtBytes(d.totalBytes || d.receivedBytes);
+    if (d.state === 'cancelled') return '已取消';
+    if (d.state === 'interrupted') return d.paused ? '已暂停' : '已中断';
+    if (d.paused) return '已暂停';
+    if (d.totalBytes > 0) {
+      var pct = Math.min(100, Math.floor(d.receivedBytes * 100 / d.totalBytes));
+      return pct + '% · ' + fmtBytes(d.speed) + '/s · ' + fmtBytes(d.receivedBytes) + '/' + fmtBytes(d.totalBytes);
+    }
+    return fmtBytes(d.receivedBytes) + ' · ' + fmtBytes(d.speed) + '/s';
+  }
+
+  function makeButton(label, action, id, primary) {
+    var b = document.createElement('button');
+    b.className = 'op' + (primary ? ' primary' : '');
+    b.textContent = label;
+    b.addEventListener('click', function () {
+      if (window.downloads) window.downloads.action(id, action);
+    });
+    return b;
+  }
+
+  function render() {
+    listEl.innerHTML = '';
+    emptyEl.style.display = items.length ? 'none' : 'flex';
+    listEl.style.display = items.length ? 'block' : 'none';
+
+    items.forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'item';
+
+      var name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = d.filename || '未命名文件';
+      name.title = d.filename || '';
+
+      var bar = document.createElement('div');
+      bar.className = 'bar';
+      var fill = document.createElement('i');
+      var pct = d.totalBytes > 0 ? Math.min(100, d.receivedBytes * 100 / d.totalBytes) : 0;
+      if (d.state === 'completed') pct = 100;
+      fill.style.width = pct + '%';
+      if (!isActive(d)) fill.className = d.state === 'completed' ? 'done' : 'fail';
+      bar.appendChild(fill);
+
+      var meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = statusText(d);
+
+      var ops = document.createElement('div');
+      ops.className = 'ops';
+      if (isActive(d)) {
+        if (d.paused || d.state === 'interrupted') ops.appendChild(makeButton('继续', 'resume', d.id));
+        else ops.appendChild(makeButton('暂停', 'pause', d.id));
+        ops.appendChild(makeButton('取消', 'cancel', d.id));
+      } else {
+        if (d.savePath) {
+          ops.appendChild(makeButton('打开文件夹', 'open-folder', d.id, true));
+          if (d.state === 'completed') ops.appendChild(makeButton('打开', 'open-file', d.id));
+        }
+        ops.appendChild(makeButton('移除', 'remove', d.id));
+      }
+
+      row.appendChild(name);
+      row.appendChild(bar);
+      row.appendChild(meta);
+      row.appendChild(ops);
+      listEl.appendChild(row);
+    });
+  }
+
+  if (window.downloads) {
+    window.downloads.onUpdate(function (list) { items = list || []; render(); });
+    window.downloads.get().then(function (list) { items = list || []; render(); }).catch(function () {});
+  }
+  document.getElementById('closeBtn').addEventListener('click', function () {
+    if (window.downloads) window.downloads.hide();
+  });
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (window.downloads) window.downloads.clearDone();
+  });
+</script>
+</body>
+</html>
 `;
 }
 
@@ -1506,6 +1978,9 @@ function buildWebAppSources(appId, config) {
 
     // preload.js（标签栏窗口的 preload）
     fs.writeFileSync(path.join(stagingDir, 'preload.js'), renderWebAppPreload(), 'utf-8');
+
+    // downloads.html（下载面板）
+    fs.writeFileSync(path.join(stagingDir, 'downloads.html'), renderWebAppDownloadsHtml(), 'utf-8');
 
     return { stagingDir, pkgContent };
 }
@@ -1671,7 +2146,7 @@ async function editWebApp(appId, config) {
 
         // 清理旧实现遗留的散落源码文件（旧版本直接写在 apps/{appId}/ 根目录，现已收进 app.asar）
         const originalFs = require('original-fs');
-        for (const name of ['main.js', 'tabbar.html', 'preload.js']) {
+        for (const name of ['main.js', 'tabbar.html', 'preload.js', 'downloads.html']) {
             const loosePath = path.join(destPath, name);
             if (originalFs.existsSync(loosePath)) {
                 originalFs.rmSync(loosePath, { force: true });
