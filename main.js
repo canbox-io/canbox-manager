@@ -167,6 +167,8 @@ ipcMain.handle('manager.apps.list', async () => {
                     const meta = readCanboxMeta(appDir);
                     const metaType = (meta && meta.type) || 'native';
                     const webApp = (meta && meta.webApp) || null;
+                    // 网页应用外壳版本与可升级信息（native 应用 shellUpgrade 恒为 null）
+                    const { shellVersion, shellUpgrade } = getShellUpgradeInfo(meta);
                     // 校验 electron 版本是否已安装（builtin + downloaded）
                     // 用于 UI 显示警告徽标，引导用户下载缺失版本
                     let electronStatus = { ok: true };
@@ -199,6 +201,9 @@ ipcMain.handle('manager.apps.list', async () => {
                         isPwa: !!(webApp && webApp.isPwa),
                         // 网页 APP 的完整配置（编辑时预填充用）
                         webAppConfig: (metaType === 'web' && webApp) ? webApp : null,
+                        // 外壳版本；shellUpgrade 非空表示可升级，含 fromVersion/toVersion/notes
+                        shellVersion,
+                        shellUpgrade,
                         // 分类：取 .canbox-app 已归一化的 category，缺省归 other
                         category: (meta && meta.category) || 'other',
                         // electron 版本状态：ok=true 表示已就绪；ok=false 时附 needDownload/version
@@ -2147,6 +2152,52 @@ function renderWebAppDownloadsHtml() {
 }
 
 /**
+ * 网页应用外壳版本
+ *
+ * 网页应用的外壳（main.js / tabbar / preload / downloads / fab）在创建或编辑时
+ * 由本模块渲染并打包进 app.asar，之后不会随 manager 升级自动更新。
+ * 因此在 .canbox-app 中记录 shellVersion，用于识别旧外壳并引导用户升级。
+ *
+ * 升版规则：外壳新增或变更用户可感知能力时，WEBAPP_SHELL_VERSION +1，
+ * 并在 WEBAPP_SHELL_RELEASES 追加该版本的 notes（i18n key，位于 webApp.shellNotes.*）。
+ * 注意：.canbox-app 的 version 字段是文件格式版本，与外壳版本无关，不要混用。
+ */
+const WEBAPP_SHELL_VERSION = 2;
+const WEBAPP_SHELL_RELEASES = [
+    {
+        version: 2,
+        notes: ['downloadPanel', 'downloadFab', 'zoomSync']
+    }
+];
+
+/**
+ * 计算网页应用的外壳升级信息
+ * @param {Object|null} meta .canbox-app 元数据
+ * @returns {{shellVersion: number, shellUpgrade: Object|null}}
+ *          shellUpgrade 为 null 表示已是最新或不是网页应用
+ */
+function getShellUpgradeInfo(meta) {
+    // 旧版本没有 shellVersion 字段，按第一版外壳处理
+    const shellVersion = (meta && Number(meta.shellVersion)) || 1;
+    if (!meta || meta.type !== 'web' || shellVersion >= WEBAPP_SHELL_VERSION) {
+        return { shellVersion, shellUpgrade: null };
+    }
+    // 聚合当前版本之后所有版本的特性，让跨级升级也能看到完整收益
+    const notes = [];
+    for (const release of WEBAPP_SHELL_RELEASES) {
+        if (release.version > shellVersion) notes.push(...release.notes);
+    }
+    return {
+        shellVersion,
+        shellUpgrade: {
+            fromVersion: shellVersion,
+            toVersion: WEBAPP_SHELL_VERSION,
+            notes
+        }
+    };
+}
+
+/**
  * 渲染 package.json 内容（不含 canbox 平台配置，平台配置写入 .canbox-app）
  */
 function renderWebAppPackageJson(config) {
@@ -2260,7 +2311,7 @@ async function packAppAsar(srcDir, outAsarPath) {
  */
 function writeWebAppOuterFiles(destPath, pkgContent, webAppConfig, electronRange, logoBase64) {
     fs.writeFileSync(path.join(destPath, 'package.json'), pkgContent, 'utf-8');
-    writeCanboxMeta(destPath, createWebMeta(electronRange, webAppConfig));
+    writeCanboxMeta(destPath, createWebMeta(electronRange, webAppConfig, WEBAPP_SHELL_VERSION));
 
     if (logoBase64 && logoBase64.startsWith('data:image/')) {
         const base64Data = logoBase64.split(',')[1];
@@ -2399,6 +2450,53 @@ async function editWebApp(appId, config) {
 
 ipcMain.handle('manager.webapp.edit', async (_e, appId, config) => {
     return editWebApp(appId, config);
+});
+
+/**
+ * 升级网页应用外壳（保留配置与数据，仅重新生成外壳）
+ *
+ * 与"编辑"的区别：不需要用户填写任何配置，全部取自现有 .canbox-app / package.json；
+ * 应用数据在独立 userData 目录，重打包 app.asar 不会影响数据，logo.png 也原样保留。
+ * @param {string} appId
+ * @returns {Promise<{success:boolean, appId?:string, shellVersion?:number, alreadyLatest?:boolean, error?:string}>}
+ */
+async function upgradeWebAppShell(appId) {
+    const destPath = path.join(USERS_PATH, 'apps', appId);
+    const meta = readCanboxMeta(destPath);
+    if (!meta || meta.type !== 'web') {
+        return { success: false, error: 'Only web app shell can be upgraded' };
+    }
+    const { shellUpgrade } = getShellUpgradeInfo(meta);
+    if (!shellUpgrade) {
+        return { success: true, appId, shellVersion: Number(meta.shellVersion) || 1, alreadyLatest: true };
+    }
+    const pkgPath = path.join(destPath, 'package.json');
+    if (!fs.existsSync(pkgPath)) {
+        return { success: false, error: 'package.json not found' };
+    }
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    const cfg = meta.webApp || {};
+
+    // 复用编辑路径重生成外壳；不传 logo，避免覆盖已有 logo.png
+    const result = await editWebApp(appId, {
+        url: cfg.url,
+        name: pkg.displayName || pkg.name || appId,
+        width: cfg.width,
+        height: cfg.height,
+        menuBar: cfg.menuBar !== false,
+        isPwa: !!cfg.isPwa,
+        manifestUrl: cfg.manifestUrl || '',
+        themeColor: cfg.themeColor || '',
+        bgColor: cfg.backgroundColor || ''
+    });
+    if (!result.success) return result;
+
+    console.log('[manager] 升级网页应用外壳:', appId, shellUpgrade.fromVersion, '->', shellUpgrade.toVersion);
+    return { ...result, shellVersion: shellUpgrade.toVersion };
+}
+
+ipcMain.handle('manager.webapp.upgradeShell', async (_e, appId) => {
+    return upgradeWebAppShell(appId);
 });
 
 // -- 仓库管理 --

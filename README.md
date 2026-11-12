@@ -68,6 +68,8 @@ Wrap any URL as a desktop app — no canbox-core injection, its own userData, fu
 
 **App list badges**: when `type === 'web'` a badge is shown — green `PWA` for PWAs, gray `WEB` for ordinary web pages; the edit button only appears for web apps.
 
+**Shell upgrades**: a web app's shell (window, tab bar, download panel, etc.) is generated when the app is created or edited and packed into `app.asar`, so it does not follow manager upgrades automatically. The `shellVersion` field in `.canbox-app` records the shell template version (missing on legacy data, treated as `1`). When the manager ships a newer shell template, the app card on "My Apps" shows a "Shell upgrade" badge; clicking it opens a confirmation dialog listing what the upgrade brings, and upgrades with one click (IPC `manager.webapp.upgradeShell`). Only the runtime shell is replaced: the URL, window size, menu bar setting, app name and logo are kept, and app data is untouched. A running instance needs a restart to pick up the new shell.
+
 **Features of the generated main.js**:
 - Chrome User-Agent spoofing (avoids sites limiting functionality for non-standard browsers)
 - Loads the page with `BrowserWindow.loadURL()`

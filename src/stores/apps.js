@@ -74,6 +74,15 @@ export const useAppsStore = defineStore('apps', () => {
         return result;
     }
 
+    // 升级网页应用外壳：仅重生成运行外壳，配置与数据保持不变
+    async function upgradeWebAppShell(appId) {
+        const result = await window.api.manager.webappUpgradeShell(appId);
+        if (result.success) {
+            await fetchApps({ silent: true });
+        }
+        return result;
+    }
+
     return {
         apps,
         loading,
@@ -87,6 +96,7 @@ export const useAppsStore = defineStore('apps', () => {
         checkUpdates,
         fetchManifest,
         createWebApp,
-        editWebApp
+        editWebApp,
+        upgradeWebAppShell
     };
 });

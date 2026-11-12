@@ -53,6 +53,35 @@ function handleEditWebApp(app) {
     webAppEditorVisible.value = true;
 }
 
+// 网页应用外壳升级：外壳由 manager 模板生成，与仓库的"内容更新"是两条独立的更新轴
+const shellUpgradeVisible = ref(false);
+const shellUpgradeApp = ref(null);
+const shellUpgrading = ref(false);
+
+function handleShellUpgrade(app) {
+    shellUpgradeApp.value = app;
+    shellUpgradeVisible.value = true;
+}
+
+async function confirmShellUpgrade() {
+    const app = shellUpgradeApp.value;
+    if (!app) return;
+    shellUpgrading.value = true;
+    try {
+        const result = await appsStore.upgradeWebAppShell(app.appId);
+        if (result.success) {
+            notification.success(t('webApp.shellUpgradeSuccess', { version: result.shellVersion }));
+            shellUpgradeVisible.value = false;
+        } else {
+            notification.error(result.error || t('webApp.shellUpgradeFailed'));
+        }
+    } catch (e) {
+        notification.error(e.message || t('webApp.shellUpgradeFailed'));
+    } finally {
+        shellUpgrading.value = false;
+    }
+}
+
 // canbox-developer 的标识（package.json 的 id / name）
 const DEVELOPER_APP_ID = 'com.github.canbox-io.canbox-developer';
 const DEVELOPER_APP_NAME = 'canbox-developer';
@@ -482,6 +511,19 @@ async function installDeveloper() {
                                 {{ $t('apps.hasUpdate') }} v{{ appUpdates[app.appId].newVersion }}
                             </span>
                         </el-tooltip>
+                        <!-- 外壳升级徽章（仅网页 APP：外壳由 manager 生成，可独立于内容更新升级） -->
+                        <el-tooltip
+                            v-if="app.shellUpgrade"
+                            :content="$t('webApp.shellUpgradeTooltip', {
+                                current: app.shellUpgrade.fromVersion,
+                                latest: app.shellUpgrade.toVersion
+                            })"
+                            placement="top"
+                        >
+                            <span class="shell-upgrade-badge" @click="handleShellUpgrade(app)">
+                                {{ $t('webApp.shellUpgradeBadge') }} v{{ app.shellUpgrade.toVersion }}
+                            </span>
+                        </el-tooltip>
                         <!-- electron 版本缺失徽标 -->
                         <el-tooltip
                             v-if="app.electronStatus && !app.electronStatus.ok && app.electronStatus.needDownload"
@@ -610,6 +652,38 @@ async function installDeveloper() {
             :mode="webAppEditorMode"
             :edit-app="editingApp"
         />
+
+        <!-- 网页应用外壳升级确认对话框：列出本次升级带来的能力，说明配置与数据不受影响 -->
+        <el-dialog
+            v-model="shellUpgradeVisible"
+            class="shell-upgrade-dialog"
+            :title="$t('webApp.shellUpgradeTitle')"
+            width="480px"
+        >
+            <div v-if="shellUpgradeApp && shellUpgradeApp.shellUpgrade" class="shell-upgrade-body">
+                <p class="shell-upgrade-desc">{{ $t('webApp.shellUpgradeDesc') }}</p>
+                <div class="shell-upgrade-versions">
+                    <span>{{ $t('webApp.shellUpgradeFrom') }}: v{{ shellUpgradeApp.shellUpgrade.fromVersion }}</span>
+                    <span class="shell-upgrade-arrow">→</span>
+                    <span class="shell-upgrade-target">{{ $t('webApp.shellUpgradeTo') }}: v{{ shellUpgradeApp.shellUpgrade.toVersion }}</span>
+                </div>
+                <template v-if="shellUpgradeApp.shellUpgrade.notes.length">
+                    <p class="shell-upgrade-features-title">{{ $t('webApp.shellUpgradeFeatures') }}</p>
+                    <ul class="shell-upgrade-features">
+                        <li v-for="note in shellUpgradeApp.shellUpgrade.notes" :key="note">
+                            {{ $t(`webApp.shellNotes.${note}`) }}
+                        </li>
+                    </ul>
+                </template>
+                <p class="shell-upgrade-restart">{{ $t('webApp.shellUpgradeRestartHint') }}</p>
+            </div>
+            <template #footer>
+                <el-button @click="shellUpgradeVisible = false">{{ $t('common.cancel') }}</el-button>
+                <el-button type="primary" :loading="shellUpgrading" @click="confirmShellUpgrade">
+                    {{ $t('webApp.shellUpgradeConfirm') }}
+                </el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
@@ -780,6 +854,23 @@ async function installDeveloper() {
 }
 .update-badge:hover {
     background: var(--el-color-warning-light-7);
+}
+/* 网页应用外壳升级徽标（与内容更新的 warning 色区分，用 primary 色） */
+.shell-upgrade-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary-dark-2);
+    border: 1px solid var(--el-color-primary-light-5);
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.shell-upgrade-badge:hover {
+    background: var(--el-color-primary-light-7);
 }
 /* electron 版本缺失徽标 */
 .electron-missing-badge {
@@ -1057,5 +1148,43 @@ async function installDeveloper() {
     background: var(--el-color-primary-light-9);
     border-radius: 4px;
     padding: 1px 8px;
+}
+</style>
+
+<!-- el-dialog 会 teleport 到 body，scoped 样式无法命中，故此处用非 scoped + 类名前缀限定作用范围 -->
+<style>
+.shell-upgrade-dialog .shell-upgrade-desc {
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--el-text-color-regular);
+}
+.shell-upgrade-dialog .shell-upgrade-versions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+.shell-upgrade-dialog .shell-upgrade-target {
+    color: var(--el-color-primary);
+    font-weight: 600;
+}
+.shell-upgrade-dialog .shell-upgrade-features-title {
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.shell-upgrade-dialog .shell-upgrade-features {
+    margin: 0 0 12px;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--el-text-color-regular);
+}
+.shell-upgrade-dialog .shell-upgrade-restart {
+    margin: 0;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
 }
 </style>

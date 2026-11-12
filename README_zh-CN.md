@@ -68,6 +68,8 @@ electron -r canbox-core/injection.js canbox-manager/ --app-id=canbox-manager --n
 
 **APP 列表角标**：`type === 'web'` 显示角标，PWA 显示绿色 `PWA`，普通网页显示灰色 `WEB`；仅网页应用显示编辑按钮。
 
+**外壳升级**：网页应用的外壳（窗口、标签栏、下载面板等）在创建/编辑时生成并打包进 `app.asar`，不会随 manager 升级自动更新。`.canbox-app` 中的 `shellVersion` 记录外壳模板版本（旧数据缺失时按 `1` 处理）。当 manager 提供更新的外壳模板时，"我的应用"卡片会显示"外壳可升级"角标，点击后在确认弹窗中可查看本次升级带来的能力并一键升级（IPC `manager.webapp.upgradeShell`）。升级只替换运行外壳：网址、窗口尺寸、菜单栏等配置、应用名称与 logo 均保留，应用数据不受影响；正在运行的实例需重启后生效。
+
 **生成的 main.js 特性**：
 - Chrome User-Agent 伪装（避免网站对非标准浏览器的功能限制）
 - `BrowserWindow.loadURL()` 加载网页

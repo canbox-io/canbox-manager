@@ -310,6 +310,22 @@
         "editSuccess": "Web app updated",
         "submitFailed": "Operation failed",
         "webBadge": "Web App",
-        "pwaBadge": "PWA App"
+        "pwaBadge": "PWA App",
+        "shellUpgradeBadge": "Shell upgrade",
+        "shellUpgradeTooltip": "Shell v{current} → v{latest}. Click to review and upgrade.",
+        "shellUpgradeTitle": "Upgrade Web App Shell",
+        "shellUpgradeDesc": "The shell is the runtime frame of a web app (window, tab bar, downloads, etc.). Upgrading only replaces the shell. The URL, window size and other settings are kept, and app data is not cleared.",
+        "shellUpgradeFrom": "Current shell",
+        "shellUpgradeTo": "Upgrade to",
+        "shellUpgradeFeatures": "What this upgrade brings",
+        "shellUpgradeRestartHint": "If the app is running, restart it to take effect.",
+        "shellUpgradeConfirm": "Upgrade now",
+        "shellUpgradeSuccess": "Shell upgraded to v{version}. Restart the app to take effect.",
+        "shellUpgradeFailed": "Shell upgrade failed",
+        "shellNotes": {
+            "downloadPanel": "New download panel to view and manage downloads in one place",
+            "downloadFab": "New draggable floating download button for quick access to the panel",
+            "zoomSync": "Page zoom level is now synced to the download panel"
+        }
     }
 }
