@@ -4,6 +4,32 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.8] - 2026-11-12
+
+### feat | 新功能 / Features
+
+为 Canbox 网页应用新增下载管理与下载面板：实时展示下载进度，任务完成后发送系统通知，并支持在文件管理器中定位已下载文件
+新增可拖动的下载浮动按钮替换原下载按钮，可随时打开下载面板
+新增网页应用外壳升级功能：检测到新外壳时展示升级徽标，可一键升级运行框架，且不修改网址、窗口尺寸等配置、不清理应用数据
+下载面板尺寸与缩放比例随当前标签页缩放同步，包括页面自身触发的缩放（如 Ctrl + 滚轮）
+
+Add download management and a download panel for Canbox web apps with real-time progress, a system notification on completion, and revealing downloaded files in the file manager
+Add a draggable floating download button replacing the previous download button to open the download panel at any time
+Add web app shell upgrade: show an upgrade badge when a newer shell is available and upgrade the runtime shell in one click without changing URL or window size settings or clearing app data
+Sync the download panel size and zoom with the active tab's zoom level, including zoom triggered by the page itself such as Ctrl + mouse wheel
+
+### fix | 问题修复 / Bug Fixes
+
+修复标签页悬停时不显示标题的问题
+
+Fix tab titles not being shown when hovering over a tab
+
+### build | 构建 / Build
+
+版本号升级至 0.3.8
+
+Bump version to 0.3.8
+
 ## [0.3.7] - 2026-11-04
 
 ### perf | 性能 / Performance
