@@ -11,8 +11,11 @@ export const useAppsStore = defineStore('apps', () => {
         categoryFilter.value = c;
     }
 
-    async function fetchApps() {
-        loading.value = true;
+    // silent=true 时不进入 loading 状态，避免列表被卸载重建导致滚动位置丢失
+    async function fetchApps({ silent = false } = {}) {
+        if (!silent || apps.value.length === 0) {
+            loading.value = true;
+        }
         try {
             apps.value = await window.api.manager.appsList();
         } finally {
@@ -58,7 +61,7 @@ export const useAppsStore = defineStore('apps', () => {
     async function createWebApp(config) {
         const result = await window.api.manager.webappCreate(config);
         if (result.success) {
-            await fetchApps();
+            await fetchApps({ silent: true });
         }
         return result;
     }
@@ -66,7 +69,7 @@ export const useAppsStore = defineStore('apps', () => {
     async function editWebApp(appId, config) {
         const result = await window.api.manager.webappEdit(appId, config);
         if (result.success) {
-            await fetchApps();
+            await fetchApps({ silent: true });
         }
         return result;
     }

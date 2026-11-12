@@ -53,10 +53,6 @@ function handleEditWebApp(app) {
     webAppEditorVisible.value = true;
 }
 
-function onWebAppSuccess() {
-    appsStore.fetchApps();
-}
-
 // canbox-developer 的标识（package.json 的 id / name）
 const DEVELOPER_APP_ID = 'com.github.canbox-io.canbox-developer';
 const DEVELOPER_APP_NAME = 'canbox-developer';
@@ -613,7 +609,6 @@ async function installDeveloper() {
             v-model:visible="webAppEditorVisible"
             :mode="webAppEditorMode"
             :edit-app="editingApp"
-            @success="onWebAppSuccess"
         />
     </div>
 </template>

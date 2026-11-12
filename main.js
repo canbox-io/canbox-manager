@@ -1194,6 +1194,14 @@ function attachTab(view, url, activate, pinned, fromWindowOpen) {
         tab.url = navUrl;
         sendTabs();
     });
+    // 页面自身触发的缩放（Ctrl+滚轮等）也同步给面板
+    view.webContents.on('zoom-changed', () => {
+        setTimeout(() => {
+            if (tab.id !== activeTabId) return;
+            _zoom = currentZoom();
+            syncPanelZoom();
+        }, 0);
+    });
     win.contentView.addChildView(view);
     tabs.push(tab);
     if (activate) activeTabId = id;
@@ -1350,9 +1358,21 @@ function setupDownloads(ses) {
 
 // ====== 下载面板 ======
 
-// 面板尺寸随页面缩放比例（_zoom）同步放大/缩小
+// 当前活跃标签页的实际缩放比例（包含 Ctrl+滚轮等页面自身触发的缩放）
+function currentZoom() {
+    const t = tabs.find(x => x.id === activeTabId);
+    const z = (t && !t.view.webContents.isDestroyed()) ? t.view.webContents.getZoomFactor() : (_zoom || 1);
+    return Math.max(0.5, Math.min(2.5, z || 1));
+}
+
+function applyPanelZoom() {
+    if (!panelView || panelView.webContents.isDestroyed()) return;
+    panelView.webContents.setZoomFactor(currentZoom());
+}
+
+// 面板尺寸随页面缩放比例同步放大/缩小
 function panelBounds() {
-    const z = Math.max(0.5, Math.min(2.5, _zoom || 1));
+    const z = currentZoom();
     const size = win.getContentSize();
     const top = tabs.length > 1 ? TAB_BAR_HEIGHT : 0;
     const width = Math.min(Math.round(PANEL_WIDTH * z), size[0] - 16);
@@ -1384,10 +1404,15 @@ function showPanel() {
         panelView.webContents.on('before-input-event', (e, input) => {
             if (input.type === 'keyDown' && input.key === 'Escape') { hidePanel(); e.preventDefault(); }
         });
+        // 页面加载完成后重新应用一次：setZoomFactor 在首次导航后可能被重置
+        panelView.webContents.on('did-finish-load', () => {
+            applyPanelZoom();
+            if (win && !win.isDestroyed()) panelView.setBounds(panelBounds());
+        });
         panelView.webContents.loadFile(path.join(__dirname, 'downloads.html'));
     }
     panelOpen = true;
-    panelView.webContents.setZoomFactor(Math.max(0.5, Math.min(2.5, _zoom || 1)));
+    applyPanelZoom();
     win.contentView.removeChildView(panelView);
     win.contentView.addChildView(panelView);
     panelView.setBounds(panelBounds());
@@ -1409,7 +1434,7 @@ function togglePanel() { if (panelOpen) hidePanel(); else showPanel(); }
 // 页面缩放变化时，让面板跟随（内容缩放 + 外框尺寸同步）
 function syncPanelZoom() {
     if (!panelOpen || !panelView || panelView.webContents.isDestroyed()) return;
-    panelView.webContents.setZoomFactor(Math.max(0.5, Math.min(2.5, _zoom || 1)));
+    applyPanelZoom();
     panelView.setBounds(panelBounds());
 }
 
