@@ -1266,12 +1266,17 @@ function openPopup(url) {
     };
     pendingPopups.set(wcId, entry);
 
+    // 尽快转为标签页：导航一提交就显示，不等 did-finish-load，
+    // 否则重资源页面（腾讯文档等）会出现明显的打开延迟。
+    // 下载链接不会提交导航（被 will-download 拦截），因此不会残留空标签页。
+    view.webContents.once('did-navigate', adopt);
+    view.webContents.once('dom-ready', adopt);
     view.webContents.once('did-finish-load', adopt);
     view.webContents.once('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
         if (isMainFrame && code !== -3) adopt();
     });
-    // 兜底：超过 1.5s 仍未渲染出文档的弹窗，也显示出来
-    entry.timer = setTimeout(adopt, 1500);
+    // 兜底：超过 600ms 仍未提交导航的弹窗，也显示出来
+    entry.timer = setTimeout(adopt, 600);
     view.webContents.once('destroyed', () => {
         if (entry.timer) clearTimeout(entry.timer);
         pendingPopups.delete(wcId);
@@ -2188,7 +2193,7 @@ function renderWebAppDownloadsHtml() {
  * 并在 WEBAPP_SHELL_RELEASES 追加该版本的 notes（i18n key，位于 webApp.shellNotes.*）。
  * 注意：.canbox-app 的 version 字段是文件格式版本，与外壳版本无关，不要混用。
  */
-const WEBAPP_SHELL_VERSION = 3;
+const WEBAPP_SHELL_VERSION = 4;
 const WEBAPP_SHELL_RELEASES = [
     {
         version: 2,
@@ -2197,6 +2202,10 @@ const WEBAPP_SHELL_RELEASES = [
     {
         version: 3,
         notes: ['spaTabTitle', 'tabTooltip']
+    },
+    {
+        version: 4,
+        notes: ['popupTabFastOpen']
     }
 ];
 

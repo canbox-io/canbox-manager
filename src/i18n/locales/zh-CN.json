@@ -337,7 +337,8 @@
             "downloadFab": "新增可拖动的下载浮动按钮，随时打开下载面板",
             "zoomSync": "页面缩放比例同步到下载面板",
             "spaTabTitle": "SPA 类网页（如腾讯文档、Notion）现在能正确显示页面文档名",
-            "tabTooltip": "鼠标悬停标签时显示完整标题 tooltip"
+            "tabTooltip": "鼠标悬停标签时显示完整标题 tooltip",
+            "popupTabFastOpen": "网页内点击链接打开新标签页时立即显示，不再有明显延迟"
         }
     }
 }
