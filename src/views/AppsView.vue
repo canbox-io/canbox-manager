@@ -248,6 +248,24 @@ async function handleLaunch(app) {
                 await promptDownloadElectron(app, result.version, result.url);
                 return;
             }
+            // 平台能力不满足：列出缺失能力，引导更新 canbox-core
+            if (result.errorCode === 'CORE_INCOMPATIBLE') {
+                const items = (result.coreCompat?.issues || [])
+                    .map(i => `<li>${escapeHtml(t('apps.coreIncompatibleItem', {
+                        feature: i.feature,
+                        required: i.required || '?'
+                    }))}</li>`)
+                    .join('');
+                await ElMessageBox.alert(
+                    `<div class="release-notes-md">${escapeHtml(t('apps.coreIncompatiblePrompt', {
+                        name: app.name,
+                        current: result.coreCompat?.coreVersion || '?'
+                    }))}</div><ul class="release-notes-md">${items}</ul>`,
+                    t('apps.coreIncompatibleTitle'),
+                    { type: 'warning', dangerouslyUseHTMLString: true }
+                );
+                return;
+            }
             notification.error(result.error || t('apps.launchFailed'));
         }
     } catch (e) {
@@ -589,6 +607,17 @@ async function installDeveloper() {
                             <span class="shell-upgrade-badge" @click="handleShellUpgrade(app)">
                                 {{ $t('webApp.shellUpgradeBadge') }} v{{ app.shellUpgrade.toVersion }}
                             </span>
+                        </el-tooltip>
+                        <!-- 平台能力不满足徽标（应用的 minCoreVersion / requires 高于当前 canbox-core） -->
+                        <el-tooltip
+                            v-if="app.coreCompat && !app.coreCompat.ok"
+                            :content="$t('apps.coreIncompatibleTooltip', {
+                                current: app.coreCompat.coreVersion,
+                                required: app.coreCompat.issues.map(i => i.required).filter(Boolean).join(', ')
+                            })"
+                            placement="top"
+                        >
+                            <span class="core-incompatible-badge">{{ $t('apps.coreIncompatibleBadge') }}</span>
                         </el-tooltip>
                         <!-- electron 版本缺失徽标 -->
                         <el-tooltip
@@ -971,6 +1000,19 @@ async function installDeveloper() {
     border-radius: 10px;
     font-size: 11px;
     font-weight: 500;
+}
+/* 平台能力不满足徽标：与 electron 缺失同色系，但用虚线边框区分语义 */
+.core-incompatible-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    background: var(--el-color-warning-light-9);
+    color: var(--el-color-warning-dark-2);
+    border: 1px dashed var(--el-color-warning);
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: help;
 }
 .downloading-electron {
     display: inline-flex;

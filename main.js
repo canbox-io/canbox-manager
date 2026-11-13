@@ -169,6 +169,8 @@ ipcMain.handle('manager.apps.list', async () => {
                     const webApp = (meta && meta.webApp) || null;
                     // 网页应用外壳版本与可升级信息（native 应用 shellUpgrade 恒为 null）
                     const { shellVersion, shellUpgrade } = getShellUpgradeInfo(meta);
+                    // 平台能力校验结果（网页应用恒为 ok）
+                    const coreCompat = getCoreCompatibility(meta);
                     // 校验 electron 版本是否已安装（builtin + downloaded）
                     // 用于 UI 显示警告徽标，引导用户下载缺失版本
                     let electronStatus = { ok: true };
@@ -208,6 +210,8 @@ ipcMain.handle('manager.apps.list', async () => {
                         category: (meta && meta.category) || 'other',
                         // electron 版本状态：ok=true 表示已就绪；ok=false 时附 needDownload/version
                         electronStatus,
+                        // 平台能力兼容性：ok=false 时 issues 列出未满足的 minCoreVersion / requires
+                        coreCompat,
                         logo,
                         path: appDir
                     });
@@ -578,6 +582,21 @@ ipcMain.handle('manager.apps.launch', async (_e, appId) => {
         // 网页应用不注入 canbox-core，使用独立 userData，避免共享 profile 污染和初始化延迟
         const meta = readCanboxMeta(appDir);
         const isWebApp = !!(meta && meta.type === 'web');
+
+        // 平台能力校验：不满足 minCoreVersion / requires 时明确拒绝启动，
+        // 而不是让 APP 运行到一半因缺少 IPC 而异常（把隐性不兼容变成明确动作）
+        if (!isWebApp) {
+            const coreCompat = getCoreCompatibility(meta);
+            if (!coreCompat.ok) {
+                console.error('[manager] 启动 APP 失败: 平台能力不满足', appId, coreCompat.issues);
+                return {
+                    success: false,
+                    errorCode: 'CORE_INCOMPATIBLE',
+                    coreCompat,
+                    error: `Requires canbox-core >= ${coreCompat.issues.map(i => i.required).filter(Boolean).join(', ')} (current ${coreCompat.coreVersion})`
+                };
+            }
+        }
 
         let electronArgs;
         if (isWebApp) {
@@ -2237,6 +2256,70 @@ function getShellUpgradeInfo(meta) {
 }
 
 /**
+ * 读取 canbox-core 的版本与能力清单（package.json 的 canbox.features）
+ * 结果缓存，避免列表渲染时反复读盘。
+ * @returns {{version: string, features: Object<string, string>}}
+ */
+let _coreRuntimeInfoCache = null;
+function getCoreRuntimeInfo() {
+    if (_coreRuntimeInfoCache) return _coreRuntimeInfoCache;
+    try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(CORE_PATH, 'package.json'), 'utf-8'));
+        _coreRuntimeInfoCache = {
+            version: pkg.version || '',
+            features: (pkg.canbox && pkg.canbox.features) || {}
+        };
+    } catch (e) {
+        _coreRuntimeInfoCache = { version: '', features: {} };
+    }
+    return _coreRuntimeInfoCache;
+}
+
+/**
+ * 校验 APP 对平台能力的要求（.canbox-app 的 minCoreVersion / requires）
+ *
+ * 语义：
+ *   - minCoreVersion: 字符串 semver，要求 canbox-core ≥ 该版本
+ *   - requires: { feature: "semver" }，字符串值为最低 core 版本；
+ *               值为 true/缺省时回退到 core 的 canbox.features 声明，未知能力视为不满足
+ *
+ * 网页应用自包含、不注入 core，恒为兼容。
+ *
+ * @param {Object|null} meta .canbox-app 元数据
+ * @returns {{ok: boolean, coreVersion: string, issues: {feature: string, required: string, current: string}[]}}
+ */
+function getCoreCompatibility(meta) {
+    const core = getCoreRuntimeInfo();
+    const issues = [];
+    if (!meta || meta.type === 'web') {
+        return { ok: true, coreVersion: core.version, issues };
+    }
+
+    const isSatisfied = (required) => {
+        if (!required) return false;
+        if (!core.version) return false;
+        return updater.compareVersions(required, core.version) <= 0;
+    };
+
+    if (meta.minCoreVersion && !isSatisfied(meta.minCoreVersion)) {
+        issues.push({ feature: 'minCoreVersion', required: meta.minCoreVersion, current: core.version });
+    }
+
+    for (const [feature, declared] of Object.entries(meta.requires || {})) {
+        const required = typeof declared === 'string' ? declared : core.features[feature];
+        if (!isSatisfied(required)) {
+            issues.push({
+                feature,
+                required: required || '',
+                current: core.version
+            });
+        }
+    }
+
+    return { ok: issues.length === 0, coreVersion: core.version, issues };
+}
+
+/**
  * 渲染 package.json 内容（不含 canbox 平台配置，平台配置写入 .canbox-app）
  */
 function renderWebAppPackageJson(config) {
@@ -2574,66 +2657,19 @@ ipcMain.handle('manager.webapp.upgradeAllShells', async () => {
 });
 
 // -- 更新说明（What's New）--
-// 唯一事实源是打包进 manager 的 CHANGELOG.md（Keep a Changelog 格式）。
-// 记录 lastSeenVersion 到独立 store，升级后首次启动时展示期间所有版本的变化。
+// 由 canbox-core 的 whats-new 服务统一实现（记录 lastSeenVersion + 解析 CHANGELOG），
+// manager 只传入自己的 CHANGELOG 路径，避免各 APP 重复实现一套解析逻辑。
+// 唯一事实源仍是打包进 manager 的 CHANGELOG.md（Keep a Changelog 格式）。
 
 const APP_UPDATES_RELEASE_NOTES_CACHE = new Map();
-const WHATS_NEW_MAX_SECTIONS = 3;
-
-function getWhatsNewStore() {
-    const store = require(path.join(CORE_PATH, 'lib', 'store'));
-    return store.getStore('canbox-manager', 'whats-new', path.join(USERS_PATH, 'data'));
-}
-
-/**
- * 解析 CHANGELOG.md 为版本段落（标题保持原样，正文中英双行由渲染层按语言筛选）
- * @returns {{version:string, date:string, body:string}[]} 按文件顺序（新版本在前）
- */
-function readChangelogSections() {
-    const file = path.join(__dirname, 'CHANGELOG.md');
-    if (!fs.existsSync(file)) {
-        logger.info('[whatsNew] CHANGELOG.md not found, skip');
-        return [];
-    }
-    const lines = fs.readFileSync(file, 'utf-8').split(/\r?\n/);
-    const sections = [];
-    let current = null;
-    for (const line of lines) {
-        // 只匹配 "## [x.y.z] - date" 这类版本标题，避免命中 "# Changelog" 与 "### 分类"
-        const matched = line.match(/^##\s+\[?([0-9]+(?:\.[0-9]+)*)\]?(?:\s*-\s*(\d{4}-\d{2}-\d{2}))?/);
-        if (matched) {
-            if (current) sections.push(current);
-            current = { version: matched[1], date: matched[2] || '', body: '' };
-            continue;
-        }
-        if (current) current.body += `${line}\n`;
-    }
-    if (current) sections.push(current);
-    return sections.map(s => ({ ...s, body: s.body.trim() }));
-}
+const whatsNewService = require(path.join(CORE_PATH, 'lib', 'whats-new'));
 
 ipcMain.handle('manager.whatsNew.get', async () => {
-    const currentVersion = app.getVersion();
     try {
-        const store = getWhatsNewStore();
-        const lastSeenVersion = store.get('lastSeenVersion') || '';
-        // 首次安装：记录当前版本，不打扰用户
-        if (!lastSeenVersion) {
-            store.set('lastSeenVersion', currentVersion);
-            return { success: true, show: false, currentVersion };
-        }
-        if (lastSeenVersion === currentVersion) {
-            return { success: true, show: false, currentVersion, lastSeenVersion };
-        }
-        const sections = readChangelogSections()
-            .filter(s => updater.compareVersions(s.version, lastSeenVersion) > 0)
-            .slice(0, WHATS_NEW_MAX_SECTIONS);
-        if (sections.length === 0) {
-            // 降级或 CHANGELOG 未覆盖该版本：直接对齐，避免每次启动都判定为待展示
-            store.set('lastSeenVersion', currentVersion);
-            return { success: true, show: false, currentVersion, lastSeenVersion };
-        }
-        return { success: true, show: true, currentVersion, lastSeenVersion, sections };
+        return whatsNewService.check({
+            version: app.getVersion(),
+            changelogPath: path.join(__dirname, 'CHANGELOG.md')
+        });
     } catch (e) {
         logger.error('[whatsNew] get failed: %s', e.message);
         return { success: false, error: e.message };
@@ -2642,9 +2678,9 @@ ipcMain.handle('manager.whatsNew.get', async () => {
 
 ipcMain.handle('manager.whatsNew.ack', async (_e, version) => {
     try {
-        getWhatsNewStore().set('lastSeenVersion', version || app.getVersion());
-        return { success: true };
+        return whatsNewService.ack(version);
     } catch (e) {
+        logger.error('[whatsNew] ack failed: %s', e.message);
         return { success: false, error: e.message };
     }
 });

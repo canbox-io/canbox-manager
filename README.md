@@ -103,6 +103,8 @@ The first launch after a manager upgrade shows a "What's New" dialog populated f
 
 When some web apps run an outdated shell, a banner appears at the top of "My Apps" ("N web apps have new features available") with a one-click bulk upgrade; single apps can also be upgraded via the "Shell upgrade" badge on their card. The update confirmation for repository apps embeds the release notes of the target version (GitHub / Gitee release body; falls back to the plain version prompt and never blocks the update).
 
+Parsing and deduplication of "What's New" are provided by the `whatsNew` service in canbox-core. Apps that rely on newer platform capabilities can declare `minCoreVersion` / `requires` in `.canbox-app`: the manager marks them as "Needs newer runtime" and blocks launch, listing the missing capabilities instead of letting the app fail later due to missing IPC.
+
 ### 4. Repository management
 
 - Add / remove app repositories
