@@ -325,7 +325,9 @@
         "shellNotes": {
             "downloadPanel": "New download panel to view and manage downloads in one place",
             "downloadFab": "New draggable floating download button for quick access to the panel",
-            "zoomSync": "Page zoom level is now synced to the download panel"
+            "zoomSync": "Page zoom level is now synced to the download panel",
+            "spaTabTitle": "SPA pages (Tencent Docs, Notion, etc.) now show the actual document title in the tab",
+            "tabTooltip": "Hover a tab to see its full title in a tooltip"
         }
     }
 }
