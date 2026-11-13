@@ -1172,11 +1172,7 @@ function activeIndex() { return tabs.findIndex(t => t.id === activeTabId); }
 
 function createView() {
     const view = new WebContentsView({
-        webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            preload: path.join(__dirname, 'view-preload.js')
-        }
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
     });
     view.webContents.setUserAgent(CHROME_UA);
 
@@ -1203,6 +1199,32 @@ function attachTab(view, url, activate, pinned, fromWindowOpen) {
         tab.url = navUrl;
         sendTabs();
     });
+
+    // SPA 运行时 title 轮询
+    // page-title-updated 只在导航期间触发，SPA 用 JS set document.title 不会触发。
+    // 主进程每 500ms 查一次 webContents.getTitle()，有变化就同步。
+    tab._titleTimer = setInterval(() => {
+        try {
+            if (!view.webContents.isDestroyed()) {
+                const curTitle = view.webContents.getTitle();
+                if (curTitle && curTitle !== tab.title) {
+                    tab.title = curTitle;
+                    sendTabs();
+                }
+            }
+        } catch (e) {}
+    }, 500);
+    view.webContents.on('destroyed', () => {
+        if (tab._titleTimer) { clearInterval(tab._titleTimer); tab._titleTimer = null; }
+    });
+    view.webContents.on('did-finish-load', () => {
+        // 页面加载完成后立刻同步一次 title（覆盖 SPA 初始化后的正确标题）
+        try {
+            const t = view.webContents.getTitle();
+            if (t && t !== tab.title) { tab.title = t; sendTabs(); }
+        } catch (e) {}
+    });
+
     // 页面自身触发的缩放（Ctrl+滚轮等）也同步给面板
     view.webContents.on('zoom-changed', () => {
         setTimeout(() => {
@@ -1648,12 +1670,6 @@ ipcMain.handle('tab:get', () => tabs.map((t, i) => ({
 ipcMain.handle('tab:switch', (_e, id) => switchTab(id));
 ipcMain.handle('tab:close', (_e, id) => closeTab(id));
 
-// SPA 运行时 title 变化（非导航触发，page-title-updated 不覆盖）
-ipcMain.on('tab:spa-title', (event, newTitle) => {
-    const tab = tabs.find(t => t.view.webContents.id === event.sender.id);
-    if (tab && newTitle && newTitle !== tab.title) { tab.title = newTitle; sendTabs(); }
-});
-
 app.whenReady().then(() => {
     const useSavedBounds = savedState && savedState.bounds && isBoundsVisible(savedState.bounds);
     const windowOptions = {
@@ -1859,82 +1875,6 @@ contextBridge.exposeInMainWorld('fab', {
     dragMove: (dx, dy) => ipcRenderer.send('fab:drag-move', dx, dy),
     dragEnd: () => ipcRenderer.send('fab:drag-end')
 });
-`;
-}
-
-/**
- * 渲染 WebContentsView 专用的 preload 脚本
- *
- * 为什么需要这个？
- * Electron 的 WebContents.page-title-updated 只在**导航期间**触发（HTML 解析时设置 <title>）。
- * SPA 类网页（腾讯文档、Notion 等）在运行时通过 JS 执行 document.title = 'xxx' 来更新标题，
- * 这不会触发导航，所以 page-title-updated 不会再次触发。
- * 这个 preload 通过两种手段捕获 SPA title 变化：
- *   1. 拦截 document.title 的 setter（SPA 最常用的 title 赋值方式）
- *   2. MutationObserver 监听 <title> 元素的 DOM 变化（有些框架会直接改文本节点）
- * 变化时通过 ipcRenderer.send('tab:spa-title', newTitle) 通知主进程。
- */
-function renderWebAppViewPreload() {
-    return `const { ipcRenderer } = require('electron');
-
-let _lastTitle = '';
-function notifyTitle() {
-    try {
-        const t = document.title;
-        if (t && t !== _lastTitle) {
-            _lastTitle = t;
-            ipcRenderer.send('tab:spa-title', t);
-        }
-    } catch (e) {}
-}
-
-function setupSPATitleObserver() {
-    // 拦截 document.title setter
-    try {
-        let _title = document.title;
-        Object.defineProperty(document, 'title', {
-            configurable: true,
-            enumerable: true,
-            get: () => _title,
-            set: function (v) {
-                _title = v;
-                notifyTitle();
-            }
-        });
-    } catch (e) {}
-
-    // 监听 <title> DOM 节点变化（覆盖 innerHTML / textContent / 直接替换元素的场景）
-    const observeTitleEl = () => {
-        const titleEl = document.querySelector('title');
-        if (!titleEl) return;
-        const mo = new MutationObserver(notifyTitle);
-        mo.observe(titleEl, { childList: true, characterData: true, subtree: true });
-    };
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', observeTitleEl, { once: true });
-    } else {
-        observeTitleEl();
-    }
-    // 有些 SPA 会把整个 <head> 替换掉，监听 head 的 childList 来应对
-    const headMo = new MutationObserver(() => {
-        notifyTitle();
-        observeTitleEl();
-    });
-    const bindHeadMo = () => {
-        if (document.head) headMo.observe(document.head, { childList: true, subtree: true });
-    };
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bindHeadMo, { once: true });
-    } else {
-        bindHeadMo();
-    }
-
-    // 初始延迟通知：让主进程尽快拿到 JS 初始化后的正确 title
-    setTimeout(notifyTitle, 400);
-}
-
-setupSPATitleObserver();
 `;
 }
 
@@ -2344,9 +2284,6 @@ function buildWebAppSources(appId, config) {
 
     // preload.js（标签栏窗口的 preload）
     fs.writeFileSync(path.join(stagingDir, 'preload.js'), renderWebAppPreload(), 'utf-8');
-
-    // view-preload.js（WebContentsView 的 preload，用于监听 SPA title 变化）
-    fs.writeFileSync(path.join(stagingDir, 'view-preload.js'), renderWebAppViewPreload(), 'utf-8');
 
     // downloads.html（下载面板）
     fs.writeFileSync(path.join(stagingDir, 'downloads.html'), renderWebAppDownloadsHtml(), 'utf-8');
