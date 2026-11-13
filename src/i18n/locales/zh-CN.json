@@ -282,6 +282,13 @@
         "noticeRange": "APP 在 .canbox-app 中声明 electron.range，启动时按范围选择最高已装版本",
         "noticeDelete": "删除内置版本不可用，只能删除下载版本"
     },
+    "whatsNew": {
+        "title": "更新内容",
+        "subtitle": "已升级到 v{version}，以下是本次更新带来的变化",
+        "dismiss": "知道了",
+        "shellHint": "有 {count} 个网页应用可升级运行外壳，升级后才能用上这些新功能。",
+        "goShellUpgrade": "去升级（{count}）"
+    },
     "webApp": {
         "create": "创建网页应用",
         "createTitle": "创建网页应用",
@@ -318,6 +325,13 @@
         "shellUpgradeConfirm": "立即升级",
         "shellUpgradeSuccess": "外壳已升级至 v{version}，重启应用后生效",
         "shellUpgradeFailed": "外壳升级失败",
+        "shellBannerTitle": "{count} 个网页应用有新功能可用",
+        "shellBannerDesc": "它们仍在使用旧版运行外壳，升级后即可获得下载管理等新能力。",
+        "shellUpgradeAll": "全部升级",
+        "shellUpgradeAllTitle": "批量升级网页应用外壳",
+        "shellUpgradeAllConfirm": "将升级 {count} 个网页应用的运行外壳。网址、窗口尺寸等配置与应用数据不受影响；正在运行的应用需重启后生效。",
+        "shellUpgradeAllSuccess": "已升级 {count} 个网页应用外壳",
+        "shellUpgradeAllPartial": "已升级 {upgraded} 个，{failed} 个失败，可稍后重试",
         "shellNotes": {
             "downloadPanel": "新增下载管理面板，集中查看和管理下载任务",
             "downloadFab": "新增可拖动的下载浮动按钮，随时打开下载面板",

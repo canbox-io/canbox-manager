@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
+import MarkdownIt from 'markdown-it';
 import { useAppsStore } from '@/stores/apps';
 import { useReposStore } from '@/stores/repos';
 import { useElectronStore } from '@/stores/electron';
@@ -58,9 +59,58 @@ const shellUpgradeVisible = ref(false);
 const shellUpgradeApp = ref(null);
 const shellUpgrading = ref(false);
 
+// release 说明渲染：html 关闭，避免仓库内容注入
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
+
+// 版本提示文案拼进 HTML 时转义，避免应用名等元数据破坏结构
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function handleShellUpgrade(app) {
     shellUpgradeApp.value = app;
     shellUpgradeVisible.value = true;
+}
+
+// 批量升级：列表顶部横幅入口
+const shellUpgradingAll = ref(false);
+
+async function handleUpgradeAllShells() {
+    const count = appsStore.shellUpgradableCount;
+    if (!count) return;
+    try {
+        await ElMessageBox.confirm(
+            t('webApp.shellUpgradeAllConfirm', { count }),
+            t('webApp.shellUpgradeAllTitle'),
+            { type: 'info', confirmButtonText: t('webApp.shellUpgradeConfirm') }
+        );
+    } catch (e) {
+        return;
+    }
+    shellUpgradingAll.value = true;
+    try {
+        const result = await appsStore.upgradeAllWebAppShells();
+        if (!result.success) {
+            notification.error(result.error || t('webApp.shellUpgradeFailed'));
+            return;
+        }
+        if (result.failed.length) {
+            notification.warning(t('webApp.shellUpgradeAllPartial', {
+                upgraded: result.upgraded.length,
+                failed: result.failed.length
+            }));
+        } else {
+            notification.success(t('webApp.shellUpgradeAllSuccess', { count: result.upgraded.length }));
+        }
+    } catch (e) {
+        notification.error(e.message || t('webApp.shellUpgradeFailed'));
+    } finally {
+        shellUpgradingAll.value = false;
+    }
 }
 
 async function confirmShellUpgrade() {
@@ -330,14 +380,19 @@ async function handleUpdateApp(app) {
     const update = appUpdates.value[app.appId];
     if (!update) return;
     try {
+        // 先拉取 release 说明，把"更新了什么"放进确认框；取不到则只显示版本变化
+        const notes = await appsStore.getReleaseNotes(update.repoUrl, update.newVersion);
+        const header = t('apps.updateConfirm', {
+            name: app.name,
+            current: update.currentVersion,
+            newVersion: update.newVersion
+        });
         await ElMessageBox.confirm(
-            t('apps.updateConfirm', {
-                name: app.name,
-                current: update.currentVersion,
-                newVersion: update.newVersion
-            }),
+            notes
+                ? `<div class="release-notes-md">${escapeHtml(header)}</div><div class="release-notes-md release-notes-body">${md.render(notes)}</div>`
+                : header,
             t('apps.update'),
-            { type: 'info' }
+            { type: 'info', dangerouslyUseHTMLString: !!notes }
         );
 
         // 检测 APP 是否正在运行
@@ -446,6 +501,17 @@ async function installDeveloper() {
                     📦 {{ $t('apps.import') }}
                 </el-button>
             </div>
+        </div>
+
+        <!-- 外壳升级横幅：集中提示"网页应用有新功能可用"，并支持一键全部升级 -->
+        <div v-if="appsStore.shellUpgradableCount > 0" class="shell-banner">
+            <div class="shell-banner-text">
+                <strong>{{ $t('webApp.shellBannerTitle', { count: appsStore.shellUpgradableCount }) }}</strong>
+                <span>{{ $t('webApp.shellBannerDesc') }}</span>
+            </div>
+            <el-button type="primary" size="small" :loading="shellUpgradingAll" @click="handleUpgradeAllShells">
+                {{ $t('webApp.shellUpgradeAll', { count: appsStore.shellUpgradableCount }) }}
+            </el-button>
         </div>
 
         <div v-if="!appsStore.loading && appsStore.apps.length > 0" class="category-filter-bar">
@@ -872,6 +938,28 @@ async function installDeveloper() {
 .shell-upgrade-badge:hover {
     background: var(--el-color-primary-light-7);
 }
+/* 外壳升级横幅 */
+.shell-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    background: var(--el-color-primary-light-9);
+    border: 1px solid var(--el-color-primary-light-7);
+    border-radius: 8px;
+}
+.shell-banner-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+}
+.shell-banner-text strong {
+    color: var(--el-color-primary-dark-2);
+}
 /* electron 版本缺失徽标 */
 .electron-missing-badge {
     display: inline-flex;
@@ -1186,5 +1274,39 @@ async function installDeveloper() {
     margin: 0;
     font-size: 12px;
     color: var(--el-text-color-secondary);
+}
+
+/* release 说明（ElMessageBox 同样 teleport 到 body，需非 scoped） */
+.release-notes-md {
+    font-size: 13px;
+    line-height: 1.6;
+}
+.release-notes-body {
+    margin-top: 8px;
+    max-height: 360px;
+    overflow-y: auto;
+    padding-top: 8px;
+    border-top: 1px solid var(--el-border-color-lighter);
+    color: var(--el-text-color-regular);
+}
+.release-notes-body h1,
+.release-notes-body h2,
+.release-notes-body h3 {
+    margin: 10px 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.release-notes-body ul,
+.release-notes-body ol {
+    margin: 6px 0;
+    padding-left: 18px;
+}
+.release-notes-body p {
+    margin: 6px 0;
+}
+.release-notes-body code {
+    background: var(--el-fill-color-light);
+    padding: 1px 4px;
+    border-radius: 3px;
 }
 </style>

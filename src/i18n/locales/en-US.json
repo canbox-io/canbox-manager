@@ -286,6 +286,13 @@
         "noticeRange": "APP declares electron.range in .canbox-app, highest installed version within range is selected at launch",
         "noticeDelete": "Builtin version cannot be deleted, only downloaded versions can"
     },
+    "whatsNew": {
+        "title": "What's New",
+        "subtitle": "You are now on v{version}. Here is what changed.",
+        "dismiss": "Got it",
+        "shellHint": "{count} web app(s) can upgrade their runtime shell to get these new features.",
+        "goShellUpgrade": "Upgrade ({count})"
+    },
     "webApp": {
         "create": "Create Web App",
         "createTitle": "Create Web App",
@@ -322,6 +329,13 @@
         "shellUpgradeConfirm": "Upgrade now",
         "shellUpgradeSuccess": "Shell upgraded to v{version}. Restart the app to take effect.",
         "shellUpgradeFailed": "Shell upgrade failed",
+        "shellBannerTitle": "{count} web app(s) have new features available",
+        "shellBannerDesc": "They still run the old shell. Upgrade to get the new capabilities such as download management.",
+        "shellUpgradeAll": "Upgrade all",
+        "shellUpgradeAllTitle": "Upgrade Web App Shells",
+        "shellUpgradeAllConfirm": "Upgrade the runtime shell of {count} web app(s). URL, window size and other settings, as well as app data, are kept. Running apps need a restart to take effect.",
+        "shellUpgradeAllSuccess": "Upgraded {count} web app shell(s)",
+        "shellUpgradeAllPartial": "Upgraded {upgraded}, {failed} failed. You can retry later.",
         "shellNotes": {
             "downloadPanel": "New download panel to view and manage downloads in one place",
             "downloadFab": "New draggable floating download button for quick access to the panel",

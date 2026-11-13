@@ -97,13 +97,19 @@ electron -r canbox-core/injection.js apps/{appId}/app.asar --app-id={appId} --no
 
 **编辑**：仅 `canbox.type === 'web'` 的应用可编辑，可修改名称、网址、图标、窗口尺寸、菜单栏开关；保存后重新生成源码并重新打包 `app.asar`（同时清理旧格式残留的散落源码文件），外部重写 `package.json` / `.canbox-app` / `logo.png` 并强制更新 launcher。
 
-### 3. 仓库管理
+### 3. 更新触达
+
+manager 升级后首次启动会弹出「更新内容」弹窗，内容直接读取打包的 `CHANGELOG.md`（按 `lastSeenVersion` 去重，最多展示 3 个版本段落，中英文按当前界面语言过滤）。
+
+当存在外壳落后的网页应用时，"我的应用"顶部会出现"N 个网页应用有新功能可用"横幅，可一键全部升级；单个应用也可通过卡片上的"外壳可升级"角标升级。仓库 APP 的更新确认框会内嵌该版本的 release 说明（GitHub / Gitee release body，取不到时退回纯版本提示，不阻塞更新）。
+
+### 4. 仓库管理
 
 - 添加 / 删除 APP 仓库
 - 浏览仓库中的 APP 列表
 - 下载 APP（按当前平台匹配 zip）
 
-### 4. 系统设置
+### 5. 系统设置
 
 - 缩放比例
 - 语言切换

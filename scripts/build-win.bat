@@ -79,7 +79,8 @@ echo   canbox-core: copied
 REM 2c. Copy manager files
 set MANAGER_DIR=%STAGE_DIR%\canbox\manager
 mkdir "%MANAGER_DIR%"
-for %%f in (main.js preload.js repo-probe.js app-launcher.js updater.js catalog-manager.js package.json) do copy /y "%%f" "%MANAGER_DIR%\" >nul
+REM CHANGELOG.md is the data source of the "What's New" dialog and must be shipped
+for %%f in (main.js preload.js repo-probe.js app-launcher.js updater.js catalog-manager.js package.json CHANGELOG.md) do copy /y "%%f" "%MANAGER_DIR%\" >nul
 xcopy /e /i /q build "%MANAGER_DIR%\build" >nul
 xcopy /e /i /q icons "%MANAGER_DIR%\icons" >nul
 if exist logo.png copy /y logo.png "%MANAGER_DIR%\" >nul

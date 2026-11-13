@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 import { useElectronStore } from '@/stores/electron';
 import { navItems } from '@/utils/nav-items';
+import WhatsNewDialog from '@/components/WhatsNewDialog.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -93,6 +94,9 @@ onUnmounted(() => {
         <el-main class="app-main">
             <router-view />
         </el-main>
+
+        <!-- 升级后首次启动提示本次更新内容（lastSeenVersion 由主进程记录） -->
+        <WhatsNewDialog />
     </el-container>
 </template>
 

@@ -52,6 +52,7 @@ const api = {
         appsClearData: (appId) => ipcRenderer.invoke('manager.apps.clearData', appId),
         appsRepairLauncher: (appId) => ipcRenderer.invoke('manager.apps.repairLauncher', appId),
         appsCheckUpdates: () => ipcRenderer.invoke('manager.apps.checkUpdates'),
+        appsGetReleaseNotes: (repoUrl, version) => ipcRenderer.invoke('manager.apps.getReleaseNotes', repoUrl, version),
         onAppsUpdatesAvailable: (callback) => {
             const handler = (_e, updates) => callback(updates);
             ipcRenderer.on('manager.apps.updatesAvailable', handler);
@@ -63,6 +64,11 @@ const api = {
         webappCreate: (config) => ipcRenderer.invoke('manager.webapp.create', config),
         webappEdit: (appId, config) => ipcRenderer.invoke('manager.webapp.edit', appId, config),
         webappUpgradeShell: (appId) => ipcRenderer.invoke('manager.webapp.upgradeShell', appId),
+        webappUpgradeAllShells: () => ipcRenderer.invoke('manager.webapp.upgradeAllShells'),
+
+        // 更新说明（What's New）
+        whatsNewGet: () => ipcRenderer.invoke('manager.whatsNew.get'),
+        whatsNewAck: (version) => ipcRenderer.invoke('manager.whatsNew.ack', version),
 
         // 仓库管理
         reposList: () => ipcRenderer.invoke('manager.repos.list'),

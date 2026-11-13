@@ -419,6 +419,36 @@ async function fetchJson(url, headers = {}) {
 }
 
 /**
+ * 拉取指定版本对应的 release 说明（更新内容）
+ *
+ * tag 命名兼容 [v{version}, {version}]；GitHub 与 Gitee 的 release API 均返回 body 字段。
+ * 仅用于"更新前告知用户改了什么"，任何失败都返回空字符串，不阻塞更新流程。
+ *
+ * @param {string} repoUrl 仓库地址
+ * @param {string} version 目标版本
+ * @returns {Promise<string>} release 说明（Markdown），取不到返回 ''
+ */
+async function getReleaseNotes(repoUrl, version) {
+    if (!repoUrl || !version) return '';
+    for (const tag of [`v${version}`, version]) {
+        const apiUrl = getReleaseApiUrl(repoUrl, tag);
+        if (!apiUrl) return '';
+        try {
+            const { data, networkError } = await fetchJson(apiUrl, { 'Accept': 'application/vnd.github+json' });
+            if (networkError) {
+                logger.info('[repo-probe] getReleaseNotes networkError=%s url=%s', networkError, apiUrl);
+                continue;
+            }
+            const notes = (data && (data.body || data.description)) || '';
+            if (notes.trim()) return notes.trim();
+        } catch (e) {
+            logger.info('[repo-probe] getReleaseNotes failed: %s url=%s', e.message, apiUrl);
+        }
+    }
+    return '';
+}
+
+/**
  * 探测仓库元数据
  *
  * @param {string} repoUrl - 仓库 URL
@@ -706,6 +736,7 @@ module.exports = {
     getWebBaseUrl,
     getRepoContext,
     getReleaseDownloadUrl,
+    getReleaseNotes,
     probeRepo,
     downloadFile,
     GITHUB_MIRRORS

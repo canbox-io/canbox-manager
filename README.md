@@ -97,13 +97,19 @@ Web apps use their own default userData path (`~/.config/<package.json name>/`) 
 
 **Editing**: only apps with `canbox.type === 'web'` are editable — name, URL, icon, window size and menu bar toggle can be changed; on save the source is regenerated and `app.asar` repacked (while removing leftover loose source files from the old format), and `package.json` / `.canbox-app` / `logo.png` are rewritten outside and the launcher is force-updated.
 
-### 3. Repository management
+### 3. Update communication
+
+The first launch after a manager upgrade shows a "What's New" dialog populated from the bundled `CHANGELOG.md` (deduplicated by `lastSeenVersion`, at most 3 version sections, filtered to the current UI language).
+
+When some web apps run an outdated shell, a banner appears at the top of "My Apps" ("N web apps have new features available") with a one-click bulk upgrade; single apps can also be upgraded via the "Shell upgrade" badge on their card. The update confirmation for repository apps embeds the release notes of the target version (GitHub / Gitee release body; falls back to the plain version prompt and never blocks the update).
+
+### 4. Repository management
 
 - Add / remove app repositories
 - Browse the app list in a repository
 - Download apps (matching the zip for the current platform)
 
-### 4. System settings
+### 5. System settings
 
 - Zoom level
 - Language switching

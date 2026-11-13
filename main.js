@@ -2592,6 +2592,133 @@ ipcMain.handle('manager.webapp.upgradeShell', async (_e, appId) => {
     return upgradeWebAppShell(appId);
 });
 
+/**
+ * 批量升级所有可升级的网页应用外壳
+ *
+ * 逐个应用顺序执行（每个都要重打包 asar），单个失败不影响其余应用。
+ * @returns {Promise<{success:boolean, upgraded:string[], failed:{appId:string,error:string}[], error?:string}>}
+ */
+async function upgradeAllWebAppShells() {
+    const appsDir = path.join(USERS_PATH, 'apps');
+    let appIds = [];
+    try {
+        appIds = fs.readdirSync(appsDir, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .map(d => d.name);
+    } catch (e) {
+        return { success: false, upgraded: [], failed: [], error: e.message };
+    }
+
+    const upgraded = [];
+    const failed = [];
+    for (const appId of appIds) {
+        const meta = readCanboxMeta(path.join(appsDir, appId));
+        if (!meta || meta.type !== 'web') continue;
+        if (!getShellUpgradeInfo(meta).shellUpgrade) continue;
+        const result = await upgradeWebAppShell(appId);
+        if (result.success) upgraded.push(appId);
+        else failed.push({ appId, error: result.error || 'unknown error' });
+    }
+    logger.info('[manager] 批量升级网页应用外壳: upgraded=%d failed=%d', upgraded.length, failed.length);
+    return { success: true, upgraded, failed };
+}
+
+ipcMain.handle('manager.webapp.upgradeAllShells', async () => {
+    return upgradeAllWebAppShells();
+});
+
+// -- 更新说明（What's New）--
+// 唯一事实源是打包进 manager 的 CHANGELOG.md（Keep a Changelog 格式）。
+// 记录 lastSeenVersion 到独立 store，升级后首次启动时展示期间所有版本的变化。
+
+const APP_UPDATES_RELEASE_NOTES_CACHE = new Map();
+const WHATS_NEW_MAX_SECTIONS = 3;
+
+function getWhatsNewStore() {
+    const store = require(path.join(CORE_PATH, 'lib', 'store'));
+    return store.getStore('canbox-manager', 'whats-new', path.join(USERS_PATH, 'data'));
+}
+
+/**
+ * 解析 CHANGELOG.md 为版本段落（标题保持原样，正文中英双行由渲染层按语言筛选）
+ * @returns {{version:string, date:string, body:string}[]} 按文件顺序（新版本在前）
+ */
+function readChangelogSections() {
+    const file = path.join(__dirname, 'CHANGELOG.md');
+    if (!fs.existsSync(file)) {
+        logger.info('[whatsNew] CHANGELOG.md not found, skip');
+        return [];
+    }
+    const lines = fs.readFileSync(file, 'utf-8').split(/\r?\n/);
+    const sections = [];
+    let current = null;
+    for (const line of lines) {
+        // 只匹配 "## [x.y.z] - date" 这类版本标题，避免命中 "# Changelog" 与 "### 分类"
+        const matched = line.match(/^##\s+\[?([0-9]+(?:\.[0-9]+)*)\]?(?:\s*-\s*(\d{4}-\d{2}-\d{2}))?/);
+        if (matched) {
+            if (current) sections.push(current);
+            current = { version: matched[1], date: matched[2] || '', body: '' };
+            continue;
+        }
+        if (current) current.body += `${line}\n`;
+    }
+    if (current) sections.push(current);
+    return sections.map(s => ({ ...s, body: s.body.trim() }));
+}
+
+ipcMain.handle('manager.whatsNew.get', async () => {
+    const currentVersion = app.getVersion();
+    try {
+        const store = getWhatsNewStore();
+        const lastSeenVersion = store.get('lastSeenVersion') || '';
+        // 首次安装：记录当前版本，不打扰用户
+        if (!lastSeenVersion) {
+            store.set('lastSeenVersion', currentVersion);
+            return { success: true, show: false, currentVersion };
+        }
+        if (lastSeenVersion === currentVersion) {
+            return { success: true, show: false, currentVersion, lastSeenVersion };
+        }
+        const sections = readChangelogSections()
+            .filter(s => updater.compareVersions(s.version, lastSeenVersion) > 0)
+            .slice(0, WHATS_NEW_MAX_SECTIONS);
+        if (sections.length === 0) {
+            // 降级或 CHANGELOG 未覆盖该版本：直接对齐，避免每次启动都判定为待展示
+            store.set('lastSeenVersion', currentVersion);
+            return { success: true, show: false, currentVersion, lastSeenVersion };
+        }
+        return { success: true, show: true, currentVersion, lastSeenVersion, sections };
+    } catch (e) {
+        logger.error('[whatsNew] get failed: %s', e.message);
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('manager.whatsNew.ack', async (_e, version) => {
+    try {
+        getWhatsNewStore().set('lastSeenVersion', version || app.getVersion());
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+// 拉取 APP 指定版本的 release 说明（内容更新说明），带内存缓存避免重复请求
+ipcMain.handle('manager.apps.getReleaseNotes', async (_e, repoUrl, version) => {
+    const key = `${repoUrl}@${version}`;
+    if (APP_UPDATES_RELEASE_NOTES_CACHE.has(key)) {
+        return { success: true, notes: APP_UPDATES_RELEASE_NOTES_CACHE.get(key) };
+    }
+    try {
+        const notes = await repoProbe.getReleaseNotes(repoUrl, version);
+        APP_UPDATES_RELEASE_NOTES_CACHE.set(key, notes);
+        return { success: true, notes };
+    } catch (e) {
+        logger.error('[apps] getReleaseNotes failed for %s: %s', key, e.message);
+        return { success: false, notes: '', error: e.message };
+    }
+});
+
 // -- 仓库管理 --
 // 仓库元数据存储在 manager 自己的 store 中（data/canbox-manager/store/repos.json）
 // 数据结构：{ repos: { [repoId]: { ...repoInfo } } }
