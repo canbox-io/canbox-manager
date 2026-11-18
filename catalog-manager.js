@@ -60,6 +60,13 @@ const BUILTIN_SOURCES = [
         url: 'https://raw.githubusercontent.com/canbox-io/canbox-catalog-data/main',
         builtin: true,
         platform: 'github'
+    },
+    {
+        id: 'gitee-community',
+        name: 'Gitee 社区',
+        url: 'https://raw.githubusercontent.com/canbox-io/canbox-catalog-data/main/sources/gitee',
+        builtin: true,
+        platform: 'gitee'
     }
 ];
 
