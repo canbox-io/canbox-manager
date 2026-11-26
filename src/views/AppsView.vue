@@ -9,6 +9,7 @@ import { useReposStore } from '@/stores/repos';
 import { useElectronStore } from '@/stores/electron';
 import { translateIpcError } from '@/i18n';
 import notification from '@/utils/notification';
+import FilterMenu from '@/components/FilterMenu.vue';
 import WebAppEditor from './WebAppEditor.vue';
 
 const { t } = useI18n();
@@ -17,19 +18,29 @@ const appsStore = useAppsStore();
 
 // 分类筛选（固定枚举 9 项 + other，与 canbox-core APP_CATEGORIES 一致）
 const CATEGORY_FILTERS = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
-// 分类筛选值绑定到 apps store，路由切换后保持状态
-const categoryFilter = computed({
-    get: () => appsStore.categoryFilter,
-    set: (v) => appsStore.setCategory(v)
+// 分类/平台筛选值绑定到 apps store，路由切换后保持状态
+const categoryFilters = computed({
+    get: () => appsStore.categoryFilters,
+    set: (v) => appsStore.setCategoryFilters(v)
 });
+const platformFilters = computed({
+    get: () => appsStore.platformFilters,
+    set: (v) => appsStore.setPlatformFilters(v)
+});
+const categoryOptions = computed(() => CATEGORY_FILTERS.map(cat => ({ value: cat, label: categoryLabel(cat) })));
 
 function categoryLabel(cat) {
     return t(`catalog.category_${cat}`);
 }
 
+// 分类与平台均为多选：默认全选等价于不筛选，空选集合表示无结果
 const filteredApps = computed(() => {
-    if (!categoryFilter.value) return appsStore.apps;
-    return appsStore.apps.filter(a => a.category === categoryFilter.value);
+    const cats = new Set(appsStore.categoryFilters);
+    const plats = new Set(appsStore.platformFilters);
+    return appsStore.apps.filter(a => {
+        if (!cats.has(a.category || 'other')) return false;
+        return getPlatforms(a).some(p => plats.has(p));
+    });
 });
 
 const reposStore = useReposStore();
@@ -159,6 +170,19 @@ const PLATFORM_NAMES = {
 function getPlatforms(app) {
     return app.platforms && app.platforms.length > 0 ? app.platforms : ['windows', 'darwin', 'linux'];
 }
+
+// 系统筛选选项（与平台图标一致）
+const PLATFORM_OPTIONS = [
+    { value: 'windows', label: PLATFORM_NAMES.windows },
+    { value: 'darwin', label: PLATFORM_NAMES.darwin },
+    { value: 'linux', label: PLATFORM_NAMES.linux }
+];
+
+// 是否存在非默认筛选条件（用于显示"重置筛选"）
+const filterActive = computed(() =>
+    CATEGORY_FILTERS.some(c => !appsStore.categoryFilters.includes(c)) ||
+    PLATFORM_OPTIONS.some(p => !appsStore.platformFilters.includes(p.value))
+);
 
 // APP 更新信息：{ [appId]: { repoUrl, currentVersion, newVersion } }
 const appUpdates = ref({});
@@ -533,19 +557,12 @@ async function installDeveloper() {
             </el-button>
         </div>
 
-        <div v-if="!appsStore.loading && appsStore.apps.length > 0" class="category-filter-bar">
-            <button
-                class="category-filter-btn"
-                :class="{ active: categoryFilter === '' }"
-                @click="categoryFilter = ''"
-            >{{ $t('catalog.allCategories') }}</button>
-            <button
-                v-for="cat in CATEGORY_FILTERS"
-                :key="cat"
-                class="category-filter-btn"
-                :class="{ active: categoryFilter === cat }"
-                @click="categoryFilter = cat"
-            >{{ categoryLabel(cat) }}</button>
+        <div v-if="!appsStore.loading && appsStore.apps.length > 0" class="filter-bar">
+            <FilterMenu v-model="categoryFilters" :label="$t('filter.category')" :options="categoryOptions" />
+            <FilterMenu v-model="platformFilters" :label="$t('filter.platform')" :options="PLATFORM_OPTIONS" />
+            <button v-if="filterActive" type="button" class="filter-reset" @click="appsStore.resetFilters()">
+                {{ $t('filter.reset') }}
+            </button>
         </div>
 
         <div v-if="appsStore.loading" class="loading-state">
@@ -556,6 +573,16 @@ async function installDeveloper() {
             <el-empty :description="$t('apps.empty')">
                 <template #extra>
                     <p class="empty-hint">{{ $t('apps.emptyHint') }}</p>
+                </template>
+            </el-empty>
+        </div>
+
+        <div v-else-if="!filteredApps.length" class="empty-state">
+            <el-empty :description="$t('filter.empty')">
+                <template #extra>
+                    <el-button type="primary" @click="appsStore.resetFilters()">
+                        {{ $t('filter.reset') }}
+                    </el-button>
                 </template>
             </el-empty>
         </div>
@@ -1260,33 +1287,6 @@ async function installDeveloper() {
     }
 }
 
-.category-filter-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    border-bottom: 1px solid var(--el-border-color-light);
-    flex-shrink: 0;
-}
-.category-filter-btn {
-    padding: 4px 14px;
-    border: 1px solid var(--el-border-color);
-    background: var(--el-bg-color);
-    border-radius: 16px;
-    font-size: 13px;
-    color: var(--el-text-color-regular);
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.category-filter-btn:hover {
-    border-color: var(--el-color-primary);
-    color: var(--el-color-primary);
-}
-.category-filter-btn.active {
-    background: var(--el-color-primary);
-    border-color: var(--el-color-primary);
-    color: #fff;
-}
 .app-category {
     margin-top: 6px;
 }

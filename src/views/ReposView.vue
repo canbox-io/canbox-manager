@@ -7,6 +7,7 @@ import { useReposStore } from '@/stores/repos';
 import { useCatalogStore } from '@/stores/catalog';
 import { translateIpcError } from '@/i18n';
 import notification from '@/utils/notification';
+import FilterMenu from '@/components/FilterMenu.vue';
 
 const { t } = useI18n();
 const reposStore = useReposStore();
@@ -14,11 +15,16 @@ const catalogStore = useCatalogStore();
 
 // 分类筛选（固定枚举 9 项 + other，与 canbox-core APP_CATEGORIES 一致）
 const CATEGORY_FILTERS = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
-// 分类筛选值绑定到 catalog store，默认组与 catalog 组共用
-const categoryFilter = computed({
-    get: () => catalogStore.categoryFilter,
-    set: (v) => catalogStore.setCategory(v)
+// 分类/平台筛选值绑定到 catalog store，默认组与 catalog 组共用
+const categoryFilters = computed({
+    get: () => catalogStore.categoryFilters,
+    set: (v) => catalogStore.setCategoryFilters(v)
 });
+const platformFilters = computed({
+    get: () => catalogStore.platformFilters,
+    set: (v) => catalogStore.setPlatformFilters(v)
+});
+const categoryOptions = computed(() => CATEGORY_FILTERS.map(cat => ({ value: cat, label: categoryLabel(cat) })));
 
 function categoryLabel(cat) {
     return t(`catalog.category_${cat}`);
@@ -190,6 +196,27 @@ function getPlatforms(repo) {
     return repo.platforms && repo.platforms.length > 0 ? repo.platforms : ['windows', 'darwin', 'linux'];
 }
 
+// 系统筛选选项（与平台图标一致）
+const PLATFORM_OPTIONS = [
+    { value: 'windows', label: PLATFORM_NAMES.windows },
+    { value: 'darwin', label: PLATFORM_NAMES.darwin },
+    { value: 'linux', label: PLATFORM_NAMES.linux }
+];
+
+// 默认组仓库按分类 + 平台筛选（平台缺省视为全平台，空选集合表示无结果）
+const filteredRepos = computed(() =>
+    reposStore.repos.filter(repo =>
+        categoryFilters.value.includes(repo.category || 'other') &&
+        getPlatforms(repo).some(p => platformFilters.value.includes(p))
+    )
+);
+
+// 是否存在非默认筛选条件（用于显示"重置筛选"）
+const filterActive = computed(() =>
+    CATEGORY_FILTERS.some(c => !catalogStore.categoryFilters.includes(c)) ||
+    PLATFORM_OPTIONS.some(p => !catalogStore.platformFilters.includes(p.value))
+);
+
 // 默认组（reposStore.repos）的 logo 已外置为二进制文件（store/repos-logos/{repoId}.{ext}），
 // 通过自定义协议 canbox-repo-logo 读取；catalog 组仍用 app.logo（data URI/URL），不变。
 function repoLogoSrc(repo) {
@@ -259,6 +286,8 @@ function onGlobalKey(e) {
 }
 
 const isDefault = computed(() => catalogStore.currentSourceId === 'default');
+// 目录源只有在新 schema 数据下才提供平台字段，旧数据源隐藏"系统"筛选
+const showPlatformFilter = computed(() => isDefault.value || catalogStore.catalogPlatformSupported);
 const currentSourceName = computed(() => {
     if (isDefault.value) return t('catalog.sourceDefault');
     return catalogStore.currentSource?.name || '';
@@ -747,34 +776,20 @@ const searchTotal = computed(() =>
             </div>
         </div>
 
-        <div v-if="!isDefault && catalogStore.currentApps.length > 0" class="category-filter-bar">
-            <button
-                class="category-filter-btn"
-                :class="{ active: categoryFilter === '' }"
-                @click="categoryFilter = ''"
-            >{{ $t('catalog.allCategories') }}</button>
-            <button
-                v-for="cat in CATEGORY_FILTERS"
-                :key="cat"
-                class="category-filter-btn"
-                :class="{ active: categoryFilter === cat }"
-                @click="categoryFilter = cat"
-            >{{ categoryLabel(cat) }}</button>
-        </div>
-
-        <div v-if="isDefault && reposStore.repos.length > 0" class="category-filter-bar">
-            <button
-                class="category-filter-btn"
-                :class="{ active: categoryFilter === '' }"
-                @click="categoryFilter = ''"
-            >{{ $t('catalog.allCategories') }}</button>
-            <button
-                v-for="cat in CATEGORY_FILTERS"
-                :key="cat"
-                class="category-filter-btn"
-                :class="{ active: categoryFilter === cat }"
-                @click="categoryFilter = cat"
-            >{{ categoryLabel(cat) }}</button>
+        <div
+            v-if="isDefault ? reposStore.repos.length > 0 : catalogStore.currentApps.length > 0"
+            class="filter-bar"
+        >
+            <FilterMenu v-model="categoryFilters" :label="$t('filter.category')" :options="categoryOptions" />
+            <FilterMenu
+                v-if="showPlatformFilter"
+                v-model="platformFilters"
+                :label="$t('filter.platform')"
+                :options="PLATFORM_OPTIONS"
+            />
+            <button v-if="filterActive" type="button" class="filter-reset" @click="catalogStore.resetFilters()">
+                {{ $t('filter.reset') }}
+            </button>
         </div>
 
         <div class="repo-list">
@@ -790,7 +805,13 @@ const searchTotal = computed(() =>
 
             <!-- 默认源：用户仓库列表 -->
             <template v-if="isDefault">
-                <div v-for="repo in reposStore.repos.filter(r => !categoryFilter || r.category === categoryFilter)" :key="repo.id" class="repo-card">
+                <!-- 有仓库但被筛选条件全部过滤时给出提示，避免误以为列表为空 -->
+                <el-empty v-if="reposStore.repos.length > 0 && filteredRepos.length === 0" :description="$t('filter.empty')">
+                    <el-button type="primary" @click="catalogStore.resetFilters()">
+                        {{ $t('filter.reset') }}
+                    </el-button>
+                </el-empty>
+                <div v-for="repo in filteredRepos" :key="repo.id" class="repo-card">
                     <img v-if="repo.logoExt" :src="repoLogoSrc(repo)" class="repo-logo" alt="logo" />
                     <div v-else class="repo-logo-placeholder">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="26" height="26"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" /></svg>
@@ -867,7 +888,13 @@ const searchTotal = computed(() =>
                 </div>
 
                 <div v-else-if="!catalogStore.loading && catalogStore.filteredApps.length === 0" class="catalog-empty">
-                    <el-empty :description="$t('catalog.empty')" />
+                    <el-empty :description="catalogStore.currentApps.length > 0 ? $t('filter.empty') : $t('catalog.empty')">
+                        <template v-if="catalogStore.currentApps.length > 0" #extra>
+                            <el-button type="primary" @click="catalogStore.resetFilters()">
+                                {{ $t('filter.reset') }}
+                            </el-button>
+                        </template>
+                    </el-empty>
                 </div>
 
                 <div v-else class="catalog-grid">
@@ -1519,31 +1546,4 @@ const searchTotal = computed(() =>
     border: 1px solid var(--el-border-color-lighter);
 }
 
-.category-filter-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    background: var(--el-bg-color);
-    border-bottom: 1px solid var(--el-border-color-lighter);
-}
-.category-filter-btn {
-    padding: 4px 14px;
-    border: 1px solid var(--el-border-color);
-    background: var(--el-bg-color);
-    border-radius: 16px;
-    font-size: 13px;
-    color: var(--el-text-color-regular);
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.category-filter-btn:hover {
-    border-color: var(--el-color-primary);
-    color: var(--el-color-primary);
-}
-.category-filter-btn.active {
-    background: var(--el-color-primary);
-    border-color: var(--el-color-primary);
-    color: #fff;
-}
 </style>

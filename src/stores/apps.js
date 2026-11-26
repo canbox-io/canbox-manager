@@ -2,13 +2,26 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 export const useAppsStore = defineStore('apps', () => {
+    // 分类/平台筛选（多选，默认全选 = 不筛选），提升到 store 以在路由切换后保持状态
+    const ALL_CATEGORIES = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
+    const ALL_PLATFORMS = ['windows', 'darwin', 'linux'];
+
     const apps = ref([]);
     const loading = ref(false);
-    // 分类筛选（'' 表示全部分类），提升到 store 以在路由切换后保持状态
-    const categoryFilter = ref('');
+    const categoryFilters = ref([...ALL_CATEGORIES]);
+    const platformFilters = ref([...ALL_PLATFORMS]);
 
-    function setCategory(c) {
-        categoryFilter.value = c;
+    function setCategoryFilters(values) {
+        categoryFilters.value = values;
+    }
+
+    function setPlatformFilters(values) {
+        platformFilters.value = values;
+    }
+
+    function resetFilters() {
+        categoryFilters.value = [...ALL_CATEGORIES];
+        platformFilters.value = [...ALL_PLATFORMS];
     }
 
     // silent=true 时不进入 loading 状态，避免列表被卸载重建导致滚动位置丢失
@@ -108,8 +121,11 @@ export const useAppsStore = defineStore('apps', () => {
     return {
         apps,
         loading,
-        categoryFilter,
-        setCategory,
+        categoryFilters,
+        platformFilters,
+        setCategoryFilters,
+        setPlatformFilters,
+        resetFilters,
         fetchApps,
         importApp,
         removeApp,

@@ -30,6 +30,7 @@ import {
     ElTable, ElTableColumn, ElAlert,
     ElTabs, ElTabPane,
     ElResult,
+    ElPopover, ElCheckbox,
     ElLoading
 } from 'element-plus';
 
@@ -81,6 +82,8 @@ app.component('ElAlert', ElAlert);
 app.component('ElTabs', ElTabs);
 app.component('ElTabPane', ElTabPane);
 app.component('ElResult', ElResult);
+app.component('ElPopover', ElPopover);
+app.component('ElCheckbox', ElCheckbox);
 
 // v-loading 指令（Element Plus 的 Loading 指令）
 app.directive('loading', ElLoading.directive);

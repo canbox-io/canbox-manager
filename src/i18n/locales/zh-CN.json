@@ -295,6 +295,16 @@
         "shellHint": "有 {count} 个网页应用可升级运行外壳，升级后才能用上这些新功能。",
         "goShellUpgrade": "去升级（{count}）"
     },
+    "filter": {
+        "category": "分类",
+        "platform": "系统",
+        "all": "全部",
+        "none": "未选",
+        "selectAll": "全选",
+        "invert": "反选",
+        "reset": "重置筛选",
+        "empty": "没有符合筛选条件的应用"
+    },
     "webApp": {
         "create": "创建网页应用",
         "createTitle": "创建网页应用",

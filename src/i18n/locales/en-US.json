@@ -299,6 +299,16 @@
         "shellHint": "{count} web app(s) can upgrade their runtime shell to get these new features.",
         "goShellUpgrade": "Upgrade ({count})"
     },
+    "filter": {
+        "category": "Category",
+        "platform": "System",
+        "all": "All",
+        "none": "None",
+        "selectAll": "Select all",
+        "invert": "Invert",
+        "reset": "Reset filters",
+        "empty": "No apps match the current filters"
+    },
     "webApp": {
         "create": "Create Web App",
         "createTitle": "Create Web App",

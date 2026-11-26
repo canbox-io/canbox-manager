@@ -32,13 +32,24 @@ export const useCatalogStore = defineStore('catalog', () => {
     const isBuiltinCurrent = computed(() => !!currentSource.value?.builtin);
 
     const searchQuery = ref('');
-    const categoryFilter = ref('');
     const sortBy = ref('stars');
 
     // 分类固定枚举（与 canbox-core APP_CATEGORIES 一致的 9 项 + other 展示桶），顺序固定
     const ALL_CATEGORIES = ['development', 'utility', 'office', 'network', 'audio', 'video', 'game', 'graphics', 'education', 'other'];
+    const ALL_PLATFORMS = ['windows', 'darwin', 'linux'];
+    // 展示分片开始携带 platforms 字段的 schema 版本（v3 起）
+    const PLATFORM_SCHEMA_VERSION = 3;
+
+    // 分类/平台筛选（多选，默认全选 = 不筛选），默认组与目录组共用
+    const categoryFilters = ref([...ALL_CATEGORIES]);
+    const platformFilters = ref([...ALL_PLATFORMS]);
 
     const allCategories = computed(() => ALL_CATEGORIES);
+
+    // 当前数据源的目录数据是否带平台信息（旧缓存/旧 schema 不支持平台筛选）
+    const catalogPlatformSupported = computed(() =>
+        (Number(currentMeta.value?.catalogSchemaVersion) || 0) >= PLATFORM_SCHEMA_VERSION
+    );
 
     function isZh() {
         return (i18n.global.locale?.value || i18n.global.locale || '').startsWith('zh');
@@ -72,8 +83,15 @@ export const useCatalogStore = defineStore('catalog', () => {
         if (q) {
             apps = apps.filter(a => matchSearch(a, q));
         }
-        if (categoryFilter.value) {
-            apps = apps.filter(a => a.category === categoryFilter.value);
+        const cats = new Set(categoryFilters.value);
+        apps = apps.filter(a => cats.has(a.category || 'other'));
+        // 平台筛选仅在数据源支持时生效；空选集合表示无结果
+        if (catalogPlatformSupported.value && platformFilters.value.length !== ALL_PLATFORMS.length) {
+            const plats = new Set(platformFilters.value);
+            apps = apps.filter(a => {
+                const appPlatforms = (a.platforms && a.platforms.length > 0) ? a.platforms : ALL_PLATFORMS;
+                return appPlatforms.some(p => plats.has(p));
+            });
         }
         if (sortBy.value === 'stars') {
             apps.sort((a, b) => (b.stars || 0) - (a.stars || 0));
@@ -176,7 +194,7 @@ export const useCatalogStore = defineStore('catalog', () => {
             return;
         }
         searchQuery.value = '';
-        categoryFilter.value = '';
+        resetFilters();
         await loadSource(sourceId);
     }
 
@@ -209,7 +227,12 @@ export const useCatalogStore = defineStore('catalog', () => {
     }
 
     function setSearch(q) { searchQuery.value = q; }
-    function setCategory(c) { categoryFilter.value = c; }
+    function setCategoryFilters(values) { categoryFilters.value = values; }
+    function setPlatformFilters(values) { platformFilters.value = values; }
+    function resetFilters() {
+        categoryFilters.value = [...ALL_CATEGORIES];
+        platformFilters.value = [...ALL_PLATFORMS];
+    }
     function setSortBy(s) { sortBy.value = s; }
 
     function isInstalled(repo, installedRepos) {
@@ -263,9 +286,10 @@ export const useCatalogStore = defineStore('catalog', () => {
     return {
         sources, currentSourceId, currentSource, currentApps, currentMeta,
         isBuiltinCurrent, loading, error, fromCache, partialFailed, tooManyShards, stale, fetchError,
-        searchQuery, categoryFilter, sortBy, allCategories, filteredApps,
+        searchQuery, categoryFilters, platformFilters, sortBy, allCategories, filteredApps,
+        catalogPlatformSupported,
         fetchSources, loadSource, primeAllCaches, setActiveSource, refreshSource, isManualRefreshLocked,
-        setSearch, setCategory, setSortBy, isInstalled, fetchReadme, fetchRepoMarkdown, matchLang,
+        setSearch, setCategoryFilters, setPlatformFilters, resetFilters, setSortBy, isInstalled, fetchReadme, fetchRepoMarkdown, matchLang,
         addSource, removeSource,
         appsBySource
     };
