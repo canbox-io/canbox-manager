@@ -2231,13 +2231,17 @@ const WEBAPP_SHELL_RELEASES = [
 /**
  * 计算网页应用的外壳升级信息
  * @param {Object|null} meta .canbox-app 元数据
- * @returns {{shellVersion: number, shellUpgrade: Object|null}}
- *          shellUpgrade 为 null 表示已是最新或不是网页应用
+ * @returns {{shellVersion: number|null, shellUpgrade: Object|null}}
+ *          shellVersion 对非网页应用为 null；shellUpgrade 为 null 表示已是最新或不是网页应用
  */
 function getShellUpgradeInfo(meta) {
+    // 非网页应用没有外壳概念，返回 null 避免渲染层误显示版本号
+    if (!meta || meta.type !== 'web') {
+        return { shellVersion: null, shellUpgrade: null };
+    }
     // 旧版本没有 shellVersion 字段，按第一版外壳处理
-    const shellVersion = (meta && Number(meta.shellVersion)) || 1;
-    if (!meta || meta.type !== 'web' || shellVersion >= WEBAPP_SHELL_VERSION) {
+    const shellVersion = Number(meta.shellVersion) || 1;
+    if (shellVersion >= WEBAPP_SHELL_VERSION) {
         return { shellVersion, shellUpgrade: null };
     }
     // 聚合当前版本之后所有版本的特性，让跨级升级也能看到完整收益
@@ -2655,6 +2659,9 @@ async function upgradeAllWebAppShells() {
 ipcMain.handle('manager.webapp.upgradeAllShells', async () => {
     return upgradeAllWebAppShells();
 });
+
+// 当前网页应用外壳模板版本（渲染端用于展示"最新外壳版本"）
+ipcMain.handle('manager.webapp.shellVersion', async () => WEBAPP_SHELL_VERSION);
 
 // -- 更新说明（What's New）--
 // 由 canbox-core 的 whats-new 服务统一实现（记录 lastSeenVersion + 解析 CHANGELOG），

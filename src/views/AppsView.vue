@@ -596,17 +596,28 @@ async function installDeveloper() {
                                 {{ $t('apps.hasUpdate') }} v{{ appUpdates[app.appId].newVersion }}
                             </span>
                         </el-tooltip>
-                        <!-- 外壳升级徽章（仅网页 APP：外壳由 manager 生成，可独立于内容更新升级） -->
+                        <!-- 外壳版本（仅网页 APP）：最新时为中性色，落后时高亮并可点击升级 -->
                         <el-tooltip
-                            v-if="app.shellUpgrade"
-                            :content="$t('webApp.shellUpgradeTooltip', {
-                                current: app.shellUpgrade.fromVersion,
-                                latest: app.shellUpgrade.toVersion
-                            })"
+                            v-if="app.type === 'web' && app.shellVersion"
+                            :content="app.shellUpgrade
+                                ? $t('webApp.shellUpgradeTooltip', {
+                                    current: app.shellUpgrade.fromVersion,
+                                    latest: app.shellUpgrade.toVersion
+                                })
+                                : $t('webApp.shellVersionLatestTip', { version: app.shellVersion })"
                             placement="top"
                         >
-                            <span class="shell-upgrade-badge" @click="handleShellUpgrade(app)">
-                                {{ $t('webApp.shellUpgradeBadge') }} v{{ app.shellUpgrade.toVersion }}
+                            <span
+                                class="shell-version-badge"
+                                :class="{ 'shell-version-badge--outdated': app.shellUpgrade }"
+                                @click="app.shellUpgrade && handleShellUpgrade(app)"
+                            >
+                                {{ app.shellUpgrade
+                                    ? $t('webApp.shellVersionUpgrade', {
+                                        current: app.shellUpgrade.fromVersion,
+                                        latest: app.shellUpgrade.toVersion
+                                    })
+                                    : $t('webApp.shellVersionBadge', { version: app.shellVersion }) }}
                             </span>
                         </el-tooltip>
                         <!-- 平台能力不满足徽标（应用的 minCoreVersion / requires 高于当前 canbox-core） -->
@@ -951,21 +962,27 @@ async function installDeveloper() {
 .update-badge:hover {
     background: var(--el-color-warning-light-7);
 }
-/* 网页应用外壳升级徽标（与内容更新的 warning 色区分，用 primary 色） */
-.shell-upgrade-badge {
+/* 网页应用外壳版本徽标：最新为中性色，可升级时高亮并可点击 */
+.shell-version-badge {
     display: inline-flex;
     align-items: center;
     padding: 1px 6px;
-    background: var(--el-color-primary-light-9);
-    color: var(--el-color-primary-dark-2);
-    border: 1px solid var(--el-color-primary-light-5);
+    background: var(--el-fill-color);
+    color: var(--el-text-color-secondary);
+    border: 1px solid var(--el-border-color-lighter);
     border-radius: 10px;
     font-size: 11px;
     font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
+    white-space: nowrap;
 }
-.shell-upgrade-badge:hover {
+.shell-version-badge--outdated {
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary-dark-2);
+    border-color: var(--el-color-primary-light-5);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.shell-version-badge--outdated:hover {
     background: var(--el-color-primary-light-7);
 }
 /* 外壳升级横幅 */

@@ -11,6 +11,8 @@ const { t } = useI18n();
 
 const platformInfo = ref(null);
 const coreVersion = ref('');
+// 网页应用外壳最新版本（manager 内置的外壳模板版本）
+const webAppShellVersion = ref(null);
 const appVersion = __APP_VERSION__;
 
 // 更新状态从 store 获取，跨视图保持
@@ -21,6 +23,8 @@ onMounted(async () => {
     try {
         platformInfo.value = await window.api.misc.getPlatformInfo();
         coreVersion.value = await window.api.misc.getCoreVersion();
+        const shellVersion = await window.api.manager.webappShellVersion();
+        webAppShellVersion.value = shellVersion || null;
     } catch (e) {
         // 降级
     }
@@ -110,6 +114,7 @@ async function restartNow() {
 
 const infoItems = [
     { key: 'coreVersion', value: coreVersion, i18n: 'about.coreVersion' },
+    { key: 'webAppShellVersion', value: () => webAppShellVersion.value ? `v${webAppShellVersion.value}` : '-', i18n: 'about.webAppShellVersion' },
     { key: 'platform', value: () => platformInfo.value ? `${platformInfo.value.platform} (${platformInfo.value.arch})` : '-', i18n: 'about.platform' },
     { key: 'electronVersion', value: () => platformInfo.value ? `Electron ${platformInfo.value.electronVersion}` : '-', i18n: 'about.electronVersion' },
     { key: 'chromeVersion', value: () => platformInfo.value ? `Chromium ${platformInfo.value.chromeVersion}` : '-', i18n: 'about.chromeVersion' },

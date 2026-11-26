@@ -65,6 +65,7 @@ const api = {
         webappEdit: (appId, config) => ipcRenderer.invoke('manager.webapp.edit', appId, config),
         webappUpgradeShell: (appId) => ipcRenderer.invoke('manager.webapp.upgradeShell', appId),
         webappUpgradeAllShells: () => ipcRenderer.invoke('manager.webapp.upgradeAllShells'),
+        webappShellVersion: () => ipcRenderer.invoke('manager.webapp.shellVersion'),
 
         // 更新说明（What's New）
         whatsNewGet: () => ipcRenderer.invoke('manager.whatsNew.get'),
