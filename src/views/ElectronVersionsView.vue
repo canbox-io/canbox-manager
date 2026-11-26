@@ -275,7 +275,7 @@ onMounted(() => {
 
 .page-title {
     margin: 0 0 8px 0;
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 600;
 }
 
