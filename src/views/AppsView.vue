@@ -191,7 +191,8 @@ async function refreshUpdates() {
 }
 
 onMounted(() => {
-    appsStore.fetchApps();
+    // 已有数据时静默刷新，避免 loading 状态把整个列表替换成 spinner 造成闪动
+    appsStore.fetchApps({ silent: true });
     // 监听后台自动检查结果
     offUpdatesAvailable = window.api.manager.onAppsUpdatesAvailable((updates) => {
         const map = {};
