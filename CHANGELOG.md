@@ -4,6 +4,46 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.3.9] - 2026-11-26
+
+### feat | 新功能 / Features
+
+新增 Gitee 社区内置数据源，开箱即可浏览社区应用目录
+新增 canbox-core 运行时兼容性校验，运行时不兼容时给出原因与更新说明
+网页应用内的链接现在会立即在新标签页打开，消除此前的打开延迟
+升级后展示更新内容弹窗，网页应用支持一键批量升级外壳至最新版本
+网页应用标签页显示 SPA 页面标题，悬停可查看完整标题
+新增网页应用外壳版本展示：应用卡片常显外壳版本（落后时显示 v3 → v4 并可直接升级），关于页展示当前内置的最新外壳版本
+应用筛选支持多选：分类与系统分别收进下拉浮层，支持三态全选、反选、重置筛选与筛选空态提示，系统按“任一匹配”过滤
+
+Add a built-in Gitee community catalog source, making community apps browsable out of the box
+Add canbox-core runtime compatibility checks with the reason and update guidance when the runtime is incompatible
+Links inside web apps now open in a new tab immediately, removing the previous delay
+Show a "What's New" dialog after upgrading, and support upgrading all web app shells in one click
+Show SPA page titles on web app tabs, with the full title available on hover
+Show web app shell versions: app cards now always display the shell version (outdated ones show v3 → v4 and can be upgraded in place), while the About page shows the latest bundled shell version
+Multi-select filters: categories and systems are grouped into dropdown popovers with tri-state select-all, invert, reset, empty-state hints, and OR matching for systems
+
+### refactor | 重构 / Refactoring
+
+移除 view-preload.js，改由主进程轮询同步 SPA 页面标题，简化网页应用注入逻辑
+“我的应用”的数据刷新改为静默模式，切换页面时不再出现列表闪烁
+
+Remove view-preload.js and sync SPA page titles by polling from the main process, simplifying web app injection
+Refresh "My Apps" data silently so switching pages no longer flashes the list
+
+### style | 样式 / Styling
+
+统一各页面标题字号为 20px，修复“应用仓库”等标题偏小的问题
+
+Unify page title font size to 20px, fixing the smaller title on pages such as "App Repository"
+
+### build | 构建 / Build
+
+版本号升级至 0.3.9
+
+Bump version to 0.3.9
+
 ## [0.3.8] - 2026-11-12
 
 ### feat | 新功能 / Features
