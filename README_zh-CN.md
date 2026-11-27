@@ -75,13 +75,19 @@ electron -r canbox-core/injection.js canbox-manager/ --app-id=canbox-manager --n
 - `BrowserWindow.loadURL()` 加载网页
 - `nodeIntegration: false` + `contextIsolation: true`（安全隔离，无 preload）
 - 菜单栏可选（创建时配置，可在编辑中修改）：
-  - 文件：退出 / 刷新
+  - 文件：下载（Ctrl+J）/ 退出（Ctrl+Q）/ 刷新（Ctrl+R）
   - 历史：上一步 / 下一步（Alt+Left / Alt+Right）
-  - 视图：重置缩放 / 放大 / 缩小 / 全屏 / 开发者工具（F12）
+  - 视图：重置缩放 / 放大 / 缩小 / 全屏（F11）/ 开发者工具（F12）
   - 窗口：最小化
-- 菜单关闭时快捷键依然生效：通过 `webContents.on('before-input-event')` 在主进程拦截
-  - Ctrl+= / Ctrl+- / Ctrl+0：缩放控制
-  - F12：开发者工具
+  - 设置：设置…（Ctrl+,）
+- 菜单开关只影响菜单栏是否显示，所有快捷键统一在 `webContents.on('before-input-event')` 中拦截：
+  - Ctrl+R：刷新当前标签页；Alt+Left / Alt+Right：前进后退
+  - Ctrl+= / Ctrl+- / Ctrl+0：缩放（所有标签页统一，并持久化到 `shell-settings.json`）
+  - Ctrl+Tab / Ctrl+Shift+Tab（或 Ctrl+PageDown / PageUp）：切换标签页；Ctrl+Shift+PageDown / PageUp：移动标签页
+  - Ctrl+W：关闭标签页；Ctrl+Q：退出；F11：全屏；F12：开发者工具
+  - Ctrl+,：打开设置窗口
+- 设置窗口（`settings.html`，独立非模态子窗口）：页面缩放、全部快捷键说明、关于（应用名称 / 网址 / 应用 ID / 外壳版本 / Electron / Chromium）
+- 外壳界面（菜单、标签栏、下载面板、设置窗口）跟随系统语言显示中文或英文
 - PWA 的 Service Worker / 离线缓存等能力由 Chromium 内核原生支持，无需额外代码
 
 **启动方式**：

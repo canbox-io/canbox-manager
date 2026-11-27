@@ -356,7 +356,10 @@
             "zoomSync": "页面缩放比例同步到下载面板",
             "spaTabTitle": "SPA 类网页（如腾讯文档、Notion）现在能正确显示页面文档名",
             "tabTooltip": "鼠标悬停标签时显示完整标题 tooltip",
-            "popupTabFastOpen": "网页内点击链接打开新标签页时立即显示，不再有明显延迟"
+            "popupTabFastOpen": "网页内点击链接打开新标签页时立即显示，不再有明显延迟",
+            "settingsWindow": "新增设置窗口（Ctrl+,），可调整页面缩放、查看全部快捷键、查看应用与外壳版本",
+            "shortcutsWithoutMenu": "关闭菜单栏后，刷新、前进后退、全屏等快捷键依然可用",
+            "shellI18n": "外壳界面（菜单、标签栏、下载面板、设置窗口）跟随系统语言显示中文或英文"
         }
     }
 }

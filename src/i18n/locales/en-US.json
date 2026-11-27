@@ -360,7 +360,10 @@
             "zoomSync": "Page zoom level is now synced to the download panel",
             "spaTabTitle": "SPA pages (Tencent Docs, Notion, etc.) now show the actual document title in the tab",
             "tabTooltip": "Hover a tab to see its full title in a tooltip",
-            "popupTabFastOpen": "New tabs opened from links inside a page now appear instantly, without noticeable delay"
+            "popupTabFastOpen": "New tabs opened from links inside a page now appear instantly, without noticeable delay",
+            "settingsWindow": "New settings window (Ctrl+,): adjust page zoom, view all shortcuts, and check app and shell versions",
+            "shortcutsWithoutMenu": "Reload, back/forward, full screen and other shortcuts now work with the menu bar hidden",
+            "shellI18n": "The shell UI (menu, tab bar, downloads panel, settings) follows the system language (Chinese or English)"
         }
     }
 }

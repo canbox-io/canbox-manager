@@ -75,13 +75,19 @@ Wrap any URL as a desktop app — no canbox-core injection, its own userData, fu
 - Loads the page with `BrowserWindow.loadURL()`
 - `nodeIntegration: false` + `contextIsolation: true` (secure isolation, no preload)
 - Optional menu bar (configured at creation time, editable later):
-  - File: Quit / Reload
+  - File: Downloads (Ctrl+J) / Quit (Ctrl+Q) / Reload (Ctrl+R)
   - History: Back / Forward (Alt+Left / Alt+Right)
-  - View: Reset Zoom / Zoom In / Zoom Out / Full Screen / Developer Tools (F12)
+  - View: Reset Zoom / Zoom In / Zoom Out / Full Screen (F11) / Developer Tools (F12)
   - Window: Minimize
-- Shortcuts keep working when the menu is hidden: intercepted in the main process via `webContents.on('before-input-event')`
-  - Ctrl+= / Ctrl+- / Ctrl+0: zoom control
-  - F12: developer tools
+  - Settings: Settings… (Ctrl+,)
+- The menu toggle only controls menu bar visibility; every shortcut is intercepted in the main process via `webContents.on('before-input-event')`:
+  - Ctrl+R: reload the current tab; Alt+Left / Alt+Right: back / forward
+  - Ctrl+= / Ctrl+- / Ctrl+0: zoom (shared by all tabs and persisted to `shell-settings.json`)
+  - Ctrl+Tab / Ctrl+Shift+Tab (or Ctrl+PageDown / PageUp): switch tabs; Ctrl+Shift+PageDown / PageUp: move tabs
+  - Ctrl+W: close tab; Ctrl+Q: quit; F11: full screen; F12: developer tools
+  - Ctrl+,: open the settings window
+- Settings window (`settings.html`, a separate non-modal child window): page zoom, full shortcut reference, and About (app name / URL / app ID / shell version / Electron / Chromium)
+- The shell UI (menu, tab bar, downloads panel, settings) follows the system language (Chinese or English)
 - PWA features such as Service Worker / offline cache are natively supported by Chromium — no extra code needed
 
 **Launching**:

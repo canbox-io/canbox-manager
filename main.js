@@ -1031,6 +1031,164 @@ ipcMain.handle('manager.webapp.fetchManifest', async (_e, url) => {
 });
 
 /**
+ * 网页应用外壳的多语言文案
+ *
+ * 外壳（菜单、标签栏、下载面板、设置窗口）生成后独立运行，拿不到 manager 的 i18n，
+ * 因此在此维护一份精简文案，按系统语言（app.getLocale）选择 zh-CN / en-US。
+ * 生成时整体嵌入外壳 main.js，preload 再通过同步 IPC 分发给各页面。
+ */
+const WEBAPP_SHELL_MESSAGES = {
+    'zh-CN': {
+        'menu.file': '文件',
+        'menu.history': '历史',
+        'menu.view': '视图',
+        'menu.window': '窗口',
+        'menu.settings': '设置',
+        'menu.downloads': '下载',
+        'menu.quit': '退出',
+        'menu.reload': '刷新',
+        'menu.back': '上一步',
+        'menu.forward': '下一步',
+        'menu.zoomReset': '重置缩放',
+        'menu.zoomIn': '放大',
+        'menu.zoomOut': '缩小',
+        'menu.fullscreen': '全屏',
+        'menu.devtools': '开发者工具',
+        'menu.minimize': '最小化',
+        'menu.settingsItem': '设置…',
+        'shortcut.reload': '刷新当前标签页',
+        'shortcut.back': '后退',
+        'shortcut.forward': '前进',
+        'shortcut.downloads': '打开或关闭下载面板',
+        'shortcut.nextTab': '切换到下一个标签页',
+        'shortcut.prevTab': '切换到上一个标签页',
+        'shortcut.moveTabNext': '当前标签页右移',
+        'shortcut.moveTabPrev': '当前标签页左移',
+        'shortcut.closeTab': '关闭当前标签页',
+        'shortcut.quit': '退出应用',
+        'shortcut.zoomIn': '放大页面',
+        'shortcut.zoomOut': '缩小页面',
+        'shortcut.zoomReset': '重置页面缩放',
+        'shortcut.fullscreen': '切换全屏',
+        'shortcut.devtools': '打开或关闭开发者工具',
+        'shortcut.settings': '打开设置窗口',
+        'shortcut.wheelKeys': 'Ctrl + 滚轮',
+        'shortcut.wheel': '缩放页面并同步到所有标签页',
+        'settings.title': '设置',
+        'settings.zoomTitle': '缩放',
+        'settings.pageZoomLabel': '网页缩放',
+        'settings.zoomHint': '调整会应用到所有标签页，并在下次启动时保留。',
+        'settings.windowZoomLabel': '设置窗口缩放',
+        'settings.windowZoomHint': '仅影响当前设置窗口，不改变网页缩放。',
+        'settings.reset': '恢复 100%',
+        'settings.shortcutsTitle': '快捷键',
+        'settings.aboutTitle': '关于',
+        'settings.close': '关闭',
+        'settings.group.page': '页面',
+        'settings.group.tab': '标签页',
+        'settings.group.window': '窗口',
+        'settings.about.name': '应用名称',
+        'settings.about.url': '网址',
+        'settings.about.appId': '应用 ID',
+        'settings.about.shellVersion': '外壳版本',
+        'settings.about.appVersion': '应用版本',
+        'settings.about.electron': 'Electron',
+        'settings.about.chrome': 'Chromium',
+        'tabbar.placeholder': '内容区',
+        'downloads.title': '下载内容',
+        'downloads.clearDone': '清除已结束',
+        'downloads.close': '关闭',
+        'downloads.empty': '暂无下载内容',
+        'downloads.untitled': '未命名文件',
+        'downloads.completed': '已完成',
+        'downloads.cancelled': '已取消',
+        'downloads.paused': '已暂停',
+        'downloads.interrupted': '已中断',
+        'downloads.resume': '继续',
+        'downloads.pause': '暂停',
+        'downloads.cancel': '取消',
+        'downloads.openFolder': '打开文件夹',
+        'downloads.openFile': '打开',
+        'downloads.remove': '移除',
+        'notify.downloadDone': '下载完成'
+    },
+    'en-US': {
+        'menu.file': 'File',
+        'menu.history': 'History',
+        'menu.view': 'View',
+        'menu.window': 'Window',
+        'menu.settings': 'Settings',
+        'menu.downloads': 'Downloads',
+        'menu.quit': 'Quit',
+        'menu.reload': 'Reload',
+        'menu.back': 'Back',
+        'menu.forward': 'Forward',
+        'menu.zoomReset': 'Reset Zoom',
+        'menu.zoomIn': 'Zoom In',
+        'menu.zoomOut': 'Zoom Out',
+        'menu.fullscreen': 'Full Screen',
+        'menu.devtools': 'Developer Tools',
+        'menu.minimize': 'Minimize',
+        'menu.settingsItem': 'Settings…',
+        'shortcut.reload': 'Reload the current tab',
+        'shortcut.back': 'Go back',
+        'shortcut.forward': 'Go forward',
+        'shortcut.downloads': 'Open or close the downloads panel',
+        'shortcut.nextTab': 'Switch to the next tab',
+        'shortcut.prevTab': 'Switch to the previous tab',
+        'shortcut.moveTabNext': 'Move the current tab right',
+        'shortcut.moveTabPrev': 'Move the current tab left',
+        'shortcut.closeTab': 'Close the current tab',
+        'shortcut.quit': 'Quit the app',
+        'shortcut.zoomIn': 'Zoom in',
+        'shortcut.zoomOut': 'Zoom out',
+        'shortcut.zoomReset': 'Reset page zoom',
+        'shortcut.fullscreen': 'Toggle full screen',
+        'shortcut.devtools': 'Open or close developer tools',
+        'shortcut.settings': 'Open the settings window',
+        'shortcut.wheelKeys': 'Ctrl + Wheel',
+        'shortcut.wheel': 'Zoom the page and sync it to all tabs',
+        'settings.title': 'Settings',
+        'settings.zoomTitle': 'Zoom',
+        'settings.pageZoomLabel': 'Page zoom',
+        'settings.zoomHint': 'Applies to all tabs and is kept for the next launch.',
+        'settings.windowZoomLabel': 'Settings window zoom',
+        'settings.windowZoomHint': 'Affects this settings window only, not the web pages.',
+        'settings.reset': 'Reset to 100%',
+        'settings.shortcutsTitle': 'Shortcuts',
+        'settings.aboutTitle': 'About',
+        'settings.close': 'Close',
+        'settings.group.page': 'Page',
+        'settings.group.tab': 'Tabs',
+        'settings.group.window': 'Window',
+        'settings.about.name': 'App name',
+        'settings.about.url': 'URL',
+        'settings.about.appId': 'App ID',
+        'settings.about.shellVersion': 'Shell version',
+        'settings.about.appVersion': 'App version',
+        'settings.about.electron': 'Electron',
+        'settings.about.chrome': 'Chromium',
+        'tabbar.placeholder': 'Content',
+        'downloads.title': 'Downloads',
+        'downloads.clearDone': 'Clear finished',
+        'downloads.close': 'Close',
+        'downloads.empty': 'No downloads',
+        'downloads.untitled': 'Untitled file',
+        'downloads.completed': 'Completed',
+        'downloads.cancelled': 'Cancelled',
+        'downloads.paused': 'Paused',
+        'downloads.interrupted': 'Interrupted',
+        'downloads.resume': 'Resume',
+        'downloads.pause': 'Pause',
+        'downloads.cancel': 'Cancel',
+        'downloads.openFolder': 'Show in folder',
+        'downloads.openFile': 'Open',
+        'downloads.remove': 'Remove',
+        'notify.downloadDone': 'Download complete'
+    }
+};
+
+/**
  * 渲染生成的 main.js 模板
  * @param {Object} config { url, name, width, height, menuBar, bgColor }
  */
@@ -1042,47 +1200,14 @@ function renderWebAppMainJs(config) {
     const name = (config.name || '').replace(/'/g, "\\'");
     const appId = (config.appId || '').replace(/'/g, "\\'");
     const menuBar = config.menuBar !== false;
+    const nameJson = JSON.stringify(config.name || '');
+    const urlJson = JSON.stringify(config.url || '');
 
-    // 菜单模板：刷新/全屏/开发者工具/退出，导航操作作用于当前活跃 tab
+    // 菜单：所有快捷键统一由 before-input-event 拦截（见 handleShortcut），
+    // 菜单项只负责展示 accelerator 和提供鼠标入口，因此 registerAccelerator 设为 false，
+    // 避免菜单可见时出现“菜单一次 + 拦截一次”的重复触发。
     const menuSetup = menuBar ? `
-    const template = [
-        {
-            label: '文件',
-            submenu: [
-                { label: '下载', accelerator: 'Control+J', click: () => { togglePanel(); } },
-                { type: 'separator' },
-                { role: 'quit', label: '退出' },
-                { role: 'reload', label: '刷新' }
-            ]
-        },
-        {
-            label: '历史',
-            submenu: [
-                { label: '上一步', accelerator: 'Alt+Left', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t && t.view.webContents.navigationHistory.canGoBack()) t.view.webContents.navigationHistory.goBack(); } },
-                { label: '下一步', accelerator: 'Alt+Right', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t && t.view.webContents.navigationHistory.canGoForward()) t.view.webContents.navigationHistory.goForward(); } }
-            ]
-        },
-        {
-            label: '视图',
-            submenu: [
-                { label: '重置缩放', accelerator: 'Ctrl+0', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t) t.view.webContents.setZoomFactor(1.0); } },
-                { label: '放大', accelerator: 'Control+=', click: () => { adjustZoom(0.1); } },
-                { label: '缩小', accelerator: 'Control+-', click: () => { adjustZoom(-0.1); } },
-                { type: 'separator' },
-                { role: 'togglefullscreen', label: '全屏' },
-                { type: 'separator' },
-                { label: '开发者工具', accelerator: 'F12', click: () => { const t = tabs.find(x => x.id === activeTabId); if (t) t.view.webContents.toggleDevTools(); } }
-            ]
-        },
-        {
-            label: '窗口',
-            submenu: [
-                { role: 'minimize', label: '最小化' }
-            ]
-        }
-    ];
-    const menu = Menu.buildFromTemplate(template);
-    Menu.setApplicationMenu(menu);` : `
+    buildApplicationMenu();` : `
     Menu.setApplicationMenu(null);`;
 
     return `// 自动生成的 Canbox 网页应用 main.js（多标签页架构）
@@ -1096,6 +1221,55 @@ app.setAppUserModelId('com.canbox.web.${appId}');
 
 // Chrome UA 伪装
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+
+// ====== 外壳信息与多语言 ======
+const APP_ID = '${appId}';
+const APP_NAME = ${nameJson};
+const APP_URL = ${urlJson};
+const SHELL_VERSION = ${WEBAPP_SHELL_VERSION};
+
+const SHELL_MESSAGES = ${JSON.stringify(WEBAPP_SHELL_MESSAGES)};
+let SHELL_LOCALE = 'zh-CN';
+
+// 跟随系统语言：中文环境用 zh-CN，其余用 en-US
+function resolveShellLocale() {
+    try {
+        const loc = String(app.getLocale() || '').toLowerCase();
+        return loc.indexOf('zh') === 0 ? 'zh-CN' : 'en-US';
+    } catch (e) {
+        return 'en-US';
+    }
+}
+
+function shellT(key) {
+    const dict = SHELL_MESSAGES[SHELL_LOCALE] || SHELL_MESSAGES['zh-CN'] || {};
+    return dict[key] || key;
+}
+
+// ====== 快捷键定义（菜单展示、主进程拦截、设置页说明共用同一份数据） ======
+const SHORTCUTS = [
+    { id: 'reload', group: 'page', accelerator: 'Ctrl+R', keys: 'Ctrl+R', labelKey: 'shortcut.reload' },
+    { id: 'back', group: 'page', accelerator: 'Alt+Left', keys: 'Alt+←', labelKey: 'shortcut.back' },
+    { id: 'forward', group: 'page', accelerator: 'Alt+Right', keys: 'Alt+→', labelKey: 'shortcut.forward' },
+    { id: 'downloads', group: 'page', accelerator: 'Ctrl+J', keys: 'Ctrl+J', labelKey: 'shortcut.downloads' },
+    { id: 'zoomIn', group: 'page', accelerator: 'Ctrl+=', keys: 'Ctrl+=', labelKey: 'shortcut.zoomIn' },
+    { id: 'zoomOut', group: 'page', accelerator: 'Ctrl+-', keys: 'Ctrl+-', labelKey: 'shortcut.zoomOut' },
+    { id: 'zoomReset', group: 'page', accelerator: 'Ctrl+0', keys: 'Ctrl+0', labelKey: 'shortcut.zoomReset' },
+    { id: 'devtools', group: 'page', accelerator: 'F12', keys: 'F12', labelKey: 'shortcut.devtools' },
+    { id: 'wheelZoom', group: 'page', keysKey: 'shortcut.wheelKeys', labelKey: 'shortcut.wheel' },
+    { id: 'nextTab', group: 'tab', accelerator: 'Ctrl+Tab', keys: 'Ctrl+Tab', labelKey: 'shortcut.nextTab' },
+    { id: 'prevTab', group: 'tab', accelerator: 'Ctrl+Shift+Tab', keys: 'Ctrl+Shift+Tab', labelKey: 'shortcut.prevTab' },
+    { id: 'moveTabNext', group: 'tab', accelerator: 'Ctrl+Shift+PageDown', keys: 'Ctrl+Shift+PageDown', labelKey: 'shortcut.moveTabNext' },
+    { id: 'moveTabPrev', group: 'tab', accelerator: 'Ctrl+Shift+PageUp', keys: 'Ctrl+Shift+PageUp', labelKey: 'shortcut.moveTabPrev' },
+    { id: 'closeTab', group: 'tab', accelerator: 'Ctrl+W', keys: 'Ctrl+W', labelKey: 'shortcut.closeTab' },
+    { id: 'fullscreen', group: 'window', accelerator: 'F11', keys: 'F11', labelKey: 'shortcut.fullscreen' },
+    { id: 'settings', group: 'window', accelerator: 'Ctrl+,', keys: 'Ctrl+,', labelKey: 'shortcut.settings' },
+    { id: 'quit', group: 'window', accelerator: 'Ctrl+Q', keys: 'Ctrl+Q', labelKey: 'shortcut.quit' }
+];
+
+function shortcutById(id) {
+    return SHORTCUTS.find(function (s) { return s.id === id; }) || null;
+}
 
 const TAB_BAR_HEIGHT = 52.5;
 const tabs = [];
@@ -1114,6 +1288,9 @@ let panelOpen = false;
 const PANEL_WIDTH = 380;
 const PANEL_HEIGHT = 460;
 
+// 设置窗口（独立非模态子窗口，单例）
+let settingsWin = null;
+
 // 可拖动的下载浮动按钮
 const FAB_SIZE = 56;
 let fabView = null;
@@ -1123,6 +1300,25 @@ let fabDragStart = null;
 
 // 窗口状态文件
 const stateFile = path.join(app.getPath('userData'), 'window-state.json');
+
+// 外壳设置文件（缩放比例等，独立于 window-state.json）
+const shellSettingsFile = path.join(app.getPath('userData'), 'shell-settings.json');
+let shellSettings = loadShellSettings();
+
+// 页面缩放：所有标签页统一，持久化到 shell-settings.json
+let _zoom = clampZoom(Number(shellSettings.zoomFactor) || 1);
+let zoomSyncGuard = false;
+
+// 设置窗口缩放：与页面缩放相互独立，单独持久化
+let settingsZoom = clampZoom(Number(shellSettings.settingsZoom) || 1);
+
+function loadShellSettings() {
+    try { return JSON.parse(fs.readFileSync(shellSettingsFile, 'utf8')) || {}; } catch (e) { return {}; }
+}
+
+function saveShellSettings() {
+    try { fs.writeFileSync(shellSettingsFile, JSON.stringify(shellSettings, null, 2)); } catch (e) {}
+}
 
 function loadWindowState() {
     try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (e) { return null; }
@@ -1242,17 +1438,25 @@ function attachTab(view, url, activate, pinned, fromWindowOpen) {
             const t = view.webContents.getTitle();
             if (t && t !== tab.title) { tab.title = t; sendTabs(); }
         } catch (e) {}
+        // setZoomFactor 在首次导航后可能被重置，加载完成后重新应用统一缩放
+        if (!zoomSyncGuard) {
+            try { view.webContents.setZoomFactor(_zoom); } catch (e) {}
+        }
     });
 
-    // 页面自身触发的缩放（Ctrl+滚轮等）也同步给面板
+    // 页面自身触发的缩放（Ctrl+滚轮）：按“所有标签页统一缩放”的语义同步并持久化
     view.webContents.on('zoom-changed', () => {
+        if (zoomSyncGuard) return;
         setTimeout(() => {
-            if (tab.id !== activeTabId) return;
-            _zoom = currentZoom();
-            syncPanelZoom();
+            if (view.webContents.isDestroyed()) return;
+            const z = clampZoom(view.webContents.getZoomFactor());
+            if (Math.abs(z - _zoom) < 0.001) return;
+            applyZoomToAll(z);
         }, 0);
     });
     win.contentView.addChildView(view);
+    // 新标签页直接沿用已保存的缩放比例
+    try { view.webContents.setZoomFactor(_zoom); } catch (e) {}
     tabs.push(tab);
     if (activate) activeTabId = id;
     layoutViews();
@@ -1343,7 +1547,7 @@ function updateTaskbarProgress() {
 function notifyDownloadDone(d) {
     if (!Notification.isSupported()) return;
     try {
-        const n = new Notification({ title: '下载完成', body: d.filename });
+        const n = new Notification({ title: shellT('notify.downloadDone'), body: d.filename });
         n.on('click', () => { if (d.savePath) shell.showItemInFolder(d.savePath); });
         n.show();
     } catch (e) {}
@@ -1457,7 +1661,8 @@ function showPanel() {
         });
         panelView.setBackgroundColor('#00000000');
         panelView.webContents.on('before-input-event', (e, input) => {
-            if (input.type === 'keyDown' && input.key === 'Escape') { hidePanel(); e.preventDefault(); }
+            if (input.type === 'keyDown' && input.key === 'Escape') { hidePanel(); e.preventDefault(); return; }
+            handleShortcut(e, input);
         });
         // 页面加载完成后重新应用一次：setZoomFactor 在首次导航后可能被重置
         panelView.webContents.on('did-finish-load', () => {
@@ -1518,6 +1723,8 @@ function ensureFabView() {
         }
     });
     fabView.setBackgroundColor('#00000000');
+    // 浮动按钮被点击后可能获得焦点，同样接入统一快捷键
+    fabView.webContents.on('before-input-event', (e, input) => handleShortcut(e, input));
     fabView.webContents.loadFile(path.join(__dirname, 'fab.html'));
     return fabView;
 }
@@ -1645,17 +1852,204 @@ function moveActiveTab(delta) {
     layoutViews();
 }
 
-// 缩放（作用于当前活跃 tab）
-let _zoom = 1.0;
-function adjustZoom(delta) {
-    const t = tabs.find(x => x.id === activeTabId);
-    if (!t) return;
-    _zoom = Math.max(0.5, Math.min(2.5, Math.round((_zoom + delta) * 10) / 10));
-    t.view.webContents.setZoomFactor(_zoom);
-    syncPanelZoom();
+// ====== 缩放（所有标签页统一，持久化到 shell-settings.json） ======
+
+function clampZoom(value) {
+    const n = Number(value);
+    const base = isNaN(n) ? 1 : n;
+    return Math.max(0.5, Math.min(2.5, Math.round(base * 10) / 10));
 }
 
-// 统一快捷键处理
+function applyZoomToAll(factor) {
+    _zoom = clampZoom(factor);
+    zoomSyncGuard = true;
+    for (const t of tabs) {
+        try {
+            if (!t.view.webContents.isDestroyed()) t.view.webContents.setZoomFactor(_zoom);
+        } catch (e) {}
+    }
+    zoomSyncGuard = false;
+    syncPanelZoom();
+    shellSettings.zoomFactor = _zoom;
+    saveShellSettings();
+    broadcastZoom();
+}
+
+function adjustZoom(delta) {
+    applyZoomToAll(_zoom + delta);
+}
+
+function broadcastZoom() {
+    if (settingsWin && !settingsWin.isDestroyed() && !settingsWin.webContents.isDestroyed()) {
+        settingsWin.webContents.send('settings:zoomChanged', _zoom);
+    }
+}
+
+// ====== 设置窗口自身的缩放（与网页缩放独立） ======
+
+function applySettingsZoom() {
+    if (!settingsWin || settingsWin.isDestroyed() || settingsWin.webContents.isDestroyed()) return;
+    try { settingsWin.webContents.setZoomFactor(settingsZoom); } catch (e) {}
+}
+
+function setSettingsZoom(factor) {
+    settingsZoom = clampZoom(factor);
+    applySettingsZoom();
+    shellSettings.settingsZoom = settingsZoom;
+    saveShellSettings();
+    if (settingsWin && !settingsWin.isDestroyed() && !settingsWin.webContents.isDestroyed()) {
+        settingsWin.webContents.send('settings:windowZoomChanged', settingsZoom);
+    }
+}
+
+function adjustSettingsZoom(delta) {
+    setSettingsZoom(settingsZoom + delta);
+}
+
+function activeTab() {
+    return tabs.find((t) => t.id === activeTabId) || null;
+}
+
+// ====== 设置窗口（独立非模态子窗口，单例） ======
+
+// 设置窗口的位置与尺寸，单独持久化到 shell-settings.json
+let settingsBoundsTimer = null;
+
+function saveSettingsBounds() {
+    if (!settingsWin || settingsWin.isDestroyed()) return;
+    try {
+        shellSettings.settingsBounds = settingsWin.getNormalBounds();
+        saveShellSettings();
+    } catch (e) {}
+}
+
+function scheduleSaveSettingsBounds() {
+    if (settingsBoundsTimer) clearTimeout(settingsBoundsTimer);
+    settingsBoundsTimer = setTimeout(saveSettingsBounds, 300);
+}
+
+function openSettings() {
+    if (settingsWin && !settingsWin.isDestroyed()) {
+        if (settingsWin.isMinimized()) settingsWin.restore();
+        settingsWin.show();
+        settingsWin.focus();
+        return;
+    }
+    const savedBounds = shellSettings.settingsBounds;
+    const useSavedBounds = !!(savedBounds && isBoundsVisible(savedBounds));
+    const options = {
+        width: 640,
+        height: 700,
+        minWidth: 520,
+        minHeight: 460,
+        // 设置窗口不允许最大化
+        maximizable: false,
+        parent: (win && !win.isDestroyed()) ? win : undefined,
+        modal: false,
+        show: false,
+        title: shellT('settings.title'),
+        backgroundColor: '#ffffff',
+        autoHideMenuBar: true,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    };
+    if (useSavedBounds) {
+        Object.assign(options, {
+            x: savedBounds.x,
+            y: savedBounds.y,
+            width: savedBounds.width,
+            height: savedBounds.height
+        });
+    }
+    settingsWin = new BrowserWindow(options);
+    settingsWin.setMenuBarVisibility(false);
+    // Windows/macOS 上该选项有效；Linux 上无效果，由下面的 maximize 事件兜底
+    settingsWin.setMaximizable(false);
+    // 记住位置与尺寸（拖动/缩放后防抖保存，关闭时立即保存）
+    settingsWin.on('resize', scheduleSaveSettingsBounds);
+    settingsWin.on('move', scheduleSaveSettingsBounds);
+    settingsWin.on('close', saveSettingsBounds);
+    // 兜底：个别窗口管理器仍可能触发最大化，立即还原
+    settingsWin.on('maximize', () => {
+        if (settingsWin && !settingsWin.isDestroyed()) settingsWin.unmaximize();
+    });
+    // 设置窗口自身的缩放：加载完成后应用（setZoomFactor 可能被首次导航重置）
+    settingsWin.webContents.on('did-finish-load', () => {
+        applySettingsZoom();
+        if (settingsWin && !settingsWin.isDestroyed() && !settingsWin.webContents.isDestroyed()) {
+            settingsWin.webContents.send('settings:windowZoomChanged', settingsZoom);
+        }
+    });
+    // Ctrl+滚轮等页面自身触发的缩放：同步到设置窗口的独立缩放
+    settingsWin.webContents.on('zoom-changed', () => {
+        setTimeout(() => {
+            if (!settingsWin || settingsWin.isDestroyed() || settingsWin.webContents.isDestroyed()) return;
+            const z = clampZoom(settingsWin.webContents.getZoomFactor());
+            if (Math.abs(z - settingsZoom) < 0.001) return;
+            setSettingsZoom(z);
+        }, 0);
+    });
+    // 设置窗口内的快捷键：Ctrl+=-0 调整窗口自身缩放；Esc / Ctrl+, / Ctrl+W 关闭
+    settingsWin.webContents.on('before-input-event', (e, input) => {
+        if (input.type !== 'keyDown') return;
+        const ctrl = input.control;
+        const noAlt = !input.alt;
+        if (ctrl && noAlt && input.code === 'Equal') { e.preventDefault(); adjustSettingsZoom(0.1); return; }
+        if (ctrl && noAlt && input.code === 'Minus') { e.preventDefault(); adjustSettingsZoom(-0.1); return; }
+        if (ctrl && noAlt && (input.code === 'Digit0' || input.code === 'Numpad0')) { e.preventDefault(); setSettingsZoom(1); return; }
+        const closeKey = input.code === 'Escape'
+            || (ctrl && !input.shift && !input.alt && (input.code === 'Comma' || input.code === 'KeyW'));
+        if (closeKey) {
+            e.preventDefault();
+            if (!settingsWin.isDestroyed()) settingsWin.close();
+        }
+    });
+    settingsWin.on('closed', () => {
+        if (settingsBoundsTimer) { clearTimeout(settingsBoundsTimer); settingsBoundsTimer = null; }
+        settingsWin = null;
+    });
+    settingsWin.once('ready-to-show', () => {
+        if (!settingsWin.isDestroyed()) settingsWin.show();
+    });
+    settingsWin.loadFile(path.join(__dirname, 'settings.html'));
+    applySettingsZoom();
+}
+
+// ====== 快捷键动作 ======
+
+function runShortcut(id) {
+    const t = activeTab();
+    switch (id) {
+        case 'reload':
+            if (t) t.view.webContents.reload();
+            break;
+        case 'back':
+            if (t && t.view.webContents.navigationHistory.canGoBack()) t.view.webContents.navigationHistory.goBack();
+            break;
+        case 'forward':
+            if (t && t.view.webContents.navigationHistory.canGoForward()) t.view.webContents.navigationHistory.goForward();
+            break;
+        case 'downloads': togglePanel(); break;
+        case 'nextTab': switchAdjacent(1); break;
+        case 'prevTab': switchAdjacent(-1); break;
+        case 'moveTabNext': moveActiveTab(1); break;
+        case 'moveTabPrev': moveActiveTab(-1); break;
+        case 'closeTab': closeTab(activeTabId); break;
+        case 'quit': if (win && !win.isDestroyed()) win.close(); break;
+        case 'zoomIn': adjustZoom(0.1); break;
+        case 'zoomOut': adjustZoom(-0.1); break;
+        case 'zoomReset': applyZoomToAll(1); break;
+        case 'fullscreen': if (win && !win.isDestroyed()) win.setFullScreen(!win.isFullScreen()); break;
+        case 'devtools': if (t) t.view.webContents.toggleDevTools(); break;
+        case 'settings': openSettings(); break;
+        default: break;
+    }
+}
+
+// 统一快捷键处理：无论是否显示菜单，所有快捷键都从这里触发
 function handleShortcut(e, input) {
     if (input.type !== 'keyDown') return;
     const ctrl = input.control;
@@ -1663,29 +2057,127 @@ function handleShortcut(e, input) {
     const alt = input.alt;
     const code = input.code;
 
-    if (ctrl && !shift && !alt && code === 'KeyW') { e.preventDefault(); closeTab(activeTabId); return; }
-    if (ctrl && !shift && !alt && code === 'KeyQ') { e.preventDefault(); win.close(); return; }
-    if (ctrl && !shift && !alt && code === 'KeyJ') { e.preventDefault(); togglePanel(); return; }
-    if (ctrl && !shift && code === 'Tab') { e.preventDefault(); switchAdjacent(1); return; }
-    if (ctrl && !shift && code === 'PageDown') { e.preventDefault(); switchAdjacent(1); return; }
-    if (ctrl && shift && code === 'Tab') { e.preventDefault(); switchAdjacent(-1); return; }
-    if (ctrl && !shift && code === 'PageUp') { e.preventDefault(); switchAdjacent(-1); return; }
-    if (ctrl && shift && code === 'PageDown') { e.preventDefault(); moveActiveTab(1); return; }
-    if (ctrl && shift && code === 'PageUp') { e.preventDefault(); moveActiveTab(-1); return; }
-    // 缩放
-    if (ctrl && code === 'Equal') { adjustZoom(0.1); e.preventDefault(); return; }
-    if (ctrl && code === 'Minus') { adjustZoom(-0.1); e.preventDefault(); return; }
-    if (ctrl && (code === 'Digit0' || code === 'Numpad0')) {
-        const t = tabs.find(x => x.id === activeTabId);
-        if (t) { _zoom = 1.0; t.view.webContents.setZoomFactor(1.0); syncPanelZoom(); }
-        e.preventDefault(); return;
-    }
-    if (code === 'F12') {
-        const t = tabs.find(x => x.id === activeTabId);
-        if (t) t.view.webContents.toggleDevTools();
-        e.preventDefault(); return;
-    }
+    let id = null;
+    if (ctrl && !shift && !alt && code === 'KeyR') id = 'reload';
+    else if (ctrl && !shift && !alt && code === 'KeyW') id = 'closeTab';
+    else if (ctrl && !shift && !alt && code === 'KeyQ') id = 'quit';
+    else if (ctrl && !shift && !alt && code === 'KeyJ') id = 'downloads';
+    else if (ctrl && !shift && !alt && code === 'Comma') id = 'settings';
+    else if (alt && !ctrl && !shift && code === 'ArrowLeft') id = 'back';
+    else if (alt && !ctrl && !shift && code === 'ArrowRight') id = 'forward';
+    else if (ctrl && !shift && code === 'Tab') id = 'nextTab';
+    else if (ctrl && !shift && code === 'PageDown') id = 'nextTab';
+    else if (ctrl && shift && code === 'Tab') id = 'prevTab';
+    else if (ctrl && !shift && code === 'PageUp') id = 'prevTab';
+    else if (ctrl && shift && code === 'PageDown') id = 'moveTabNext';
+    else if (ctrl && shift && code === 'PageUp') id = 'moveTabPrev';
+    else if (ctrl && !alt && code === 'Equal') id = 'zoomIn';
+    else if (ctrl && !alt && code === 'Minus') id = 'zoomOut';
+    else if (ctrl && !alt && (code === 'Digit0' || code === 'Numpad0')) id = 'zoomReset';
+    else if (!ctrl && !alt && code === 'F11') id = 'fullscreen';
+    else if (code === 'F12') id = 'devtools';
+
+    if (!id) return;
+    e.preventDefault();
+    runShortcut(id);
 }
+
+// ====== 菜单（只做展示与鼠标入口，快捷键统一由 handleShortcut 处理） ======
+
+function buildApplicationMenu() {
+    const item = (id, labelKey) => {
+        const def = shortcutById(id);
+        return {
+            label: shellT(labelKey || def.labelKey),
+            accelerator: def.accelerator,
+            registerAccelerator: false,
+            click: () => runShortcut(id)
+        };
+    };
+    const template = [
+        {
+            label: shellT('menu.file'),
+            submenu: [
+                item('downloads', 'menu.downloads'),
+                { type: 'separator' },
+                item('quit', 'menu.quit'),
+                item('reload', 'menu.reload')
+            ]
+        },
+        {
+            label: shellT('menu.history'),
+            submenu: [ item('back', 'menu.back'), item('forward', 'menu.forward') ]
+        },
+        {
+            label: shellT('menu.view'),
+            submenu: [
+                item('zoomReset', 'menu.zoomReset'),
+                item('zoomIn', 'menu.zoomIn'),
+                item('zoomOut', 'menu.zoomOut'),
+                { type: 'separator' },
+                item('fullscreen', 'menu.fullscreen'),
+                { type: 'separator' },
+                item('devtools', 'menu.devtools')
+            ]
+        },
+        {
+            label: shellT('menu.window'),
+            submenu: [
+                { label: shellT('menu.minimize'), click: () => { if (win && !win.isDestroyed()) win.minimize(); } }
+            ]
+        },
+        {
+            label: shellT('menu.settings'),
+            submenu: [
+                {
+                    label: shellT('menu.settingsItem'),
+                    accelerator: 'Ctrl+,',
+                    registerAccelerator: false,
+                    click: () => openSettings()
+                }
+            ]
+        }
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// ====== 外壳 IPC：多语言 / 设置窗口 ======
+
+ipcMain.on('shell:i18n', (e) => {
+    e.returnValue = {
+        locale: SHELL_LOCALE,
+        messages: SHELL_MESSAGES[SHELL_LOCALE] || SHELL_MESSAGES['zh-CN'] || {}
+    };
+});
+
+ipcMain.handle('settings:get-info', () => ({
+    name: APP_NAME,
+    url: APP_URL,
+    appId: APP_ID,
+    appVersion: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    shellVersion: SHELL_VERSION
+}));
+
+ipcMain.handle('settings:get-shortcuts', () => SHORTCUTS.map((s) => ({
+    group: s.group,
+    keys: s.keysKey ? shellT(s.keysKey) : s.keys,
+    label: shellT(s.labelKey)
+})));
+
+ipcMain.handle('settings:get-zoom', () => _zoom);
+ipcMain.handle('settings:set-zoom', (_e, factor) => { applyZoomToAll(factor); return _zoom; });
+ipcMain.handle('settings:reset-zoom', () => { applyZoomToAll(1); return _zoom; });
+
+// 设置窗口自身缩放（与网页缩放独立）
+ipcMain.handle('settings:get-window-zoom', () => settingsZoom);
+ipcMain.handle('settings:set-window-zoom', (_e, factor) => { setSettingsZoom(factor); return settingsZoom; });
+ipcMain.handle('settings:reset-window-zoom', () => { setSettingsZoom(1); return settingsZoom; });
+
+ipcMain.handle('settings:close', () => {
+    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
+});
 
 ipcMain.handle('tab:get', () => tabs.map((t, i) => ({
     id: t.id, title: t.title, url: t.url,
@@ -1695,6 +2187,8 @@ ipcMain.handle('tab:switch', (_e, id) => switchTab(id));
 ipcMain.handle('tab:close', (_e, id) => closeTab(id));
 
 app.whenReady().then(() => {
+    // 语言需在创建任何窗口（含标签栏 preload 的同步 IPC）之前确定
+    SHELL_LOCALE = resolveShellLocale();
     const useSavedBounds = savedState && savedState.bounds && isBoundsVisible(savedState.bounds);
     const windowOptions = {
         backgroundColor: '${bgColor}',
@@ -1838,6 +2332,10 @@ function renderWebAppTabbarHtml() {
   const tabBar = document.getElementById('tabBar');
   const placeholder = document.getElementById('placeholder');
 
+  if (window.i18n) {
+    placeholder.textContent = window.i18n.t('tabbar.placeholder');
+  }
+
   function renderTabs() {
     tabBar.querySelectorAll('.tab').forEach(el => el.remove());
     tabList.forEach(t => {
@@ -1878,6 +2376,18 @@ function renderWebAppTabbarHtml() {
 function renderWebAppPreload() {
     return `const { contextBridge, ipcRenderer } = require('electron');
 
+// 多语言文案在主进程统一维护，preload 同步取一次后分发给页面
+let i18nData = { locale: 'zh-CN', messages: {} };
+try {
+    i18nData = ipcRenderer.sendSync('shell:i18n') || i18nData;
+} catch (e) {}
+
+contextBridge.exposeInMainWorld('i18n', {
+    locale: i18nData.locale || 'zh-CN',
+    messages: i18nData.messages || {},
+    t: (key) => (i18nData.messages && i18nData.messages[key]) || key
+});
+
 contextBridge.exposeInMainWorld('tabs', {
     get: () => ipcRenderer.invoke('tab:get'),
     switch: (id) => ipcRenderer.invoke('tab:switch', id),
@@ -1892,6 +2402,20 @@ contextBridge.exposeInMainWorld('downloads', {
     action: (id, action) => ipcRenderer.invoke('downloads:action', id, action),
     clearDone: () => ipcRenderer.invoke('downloads:clear-done'),
     onUpdate: (cb) => ipcRenderer.on('downloads:update', (_e, list) => cb(list))
+});
+
+contextBridge.exposeInMainWorld('settings', {
+    getInfo: () => ipcRenderer.invoke('settings:get-info'),
+    getShortcuts: () => ipcRenderer.invoke('settings:get-shortcuts'),
+    getZoom: () => ipcRenderer.invoke('settings:get-zoom'),
+    setZoom: (factor) => ipcRenderer.invoke('settings:set-zoom', factor),
+    resetZoom: () => ipcRenderer.invoke('settings:reset-zoom'),
+    getWindowZoom: () => ipcRenderer.invoke('settings:get-window-zoom'),
+    setWindowZoom: (factor) => ipcRenderer.invoke('settings:set-window-zoom', factor),
+    resetWindowZoom: () => ipcRenderer.invoke('settings:reset-window-zoom'),
+    close: () => ipcRenderer.invoke('settings:close'),
+    onZoomChanged: (cb) => ipcRenderer.on('settings:zoomChanged', (_e, factor) => cb(factor)),
+    onWindowZoomChanged: (cb) => ipcRenderer.on('settings:windowZoomChanged', (_e, factor) => cb(factor))
 });
 
 contextBridge.exposeInMainWorld('fab', {
@@ -1960,6 +2484,10 @@ function renderWebAppFabHtml() {
   var badge = document.getElementById('badge');
   var ring = document.getElementById('ring');
   var startX = 0, startY = 0, dragging = false, moved = false;
+
+  if (window.i18n) {
+    fabEl.title = window.i18n.t('downloads.title');
+  }
 
   function update(list) {
     list = list || [];
@@ -2088,7 +2616,7 @@ function renderWebAppDownloadsHtml() {
 <body>
   <div class="panel">
     <div class="panel-head">
-      <span class="panel-title">下载内容</span>
+      <span class="panel-title" id="panelTitle">下载内容</span>
       <div class="head-actions">
         <button class="link" id="clearBtn">清除已结束</button>
         <button class="icon-btn" id="closeBtn" title="关闭">×</button>
@@ -2101,6 +2629,12 @@ function renderWebAppDownloadsHtml() {
   var items = [];
   var listEl = document.getElementById('list');
   var emptyEl = document.getElementById('empty');
+  var t = function (key) { return window.i18n ? window.i18n.t(key) : key; };
+
+  document.getElementById('panelTitle').textContent = t('downloads.title');
+  document.getElementById('clearBtn').textContent = t('downloads.clearDone');
+  document.getElementById('closeBtn').title = t('downloads.close');
+  emptyEl.textContent = t('downloads.empty');
 
   function fmtBytes(n) {
     n = Number(n) || 0;
@@ -2115,10 +2649,10 @@ function renderWebAppDownloadsHtml() {
   function isActive(d) { return d.state === 'progressing' || d.state === 'interrupted'; }
 
   function statusText(d) {
-    if (d.state === 'completed') return '已完成 · ' + fmtBytes(d.totalBytes || d.receivedBytes);
-    if (d.state === 'cancelled') return '已取消';
-    if (d.state === 'interrupted') return d.paused ? '已暂停' : '已中断';
-    if (d.paused) return '已暂停';
+    if (d.state === 'completed') return t('downloads.completed') + ' · ' + fmtBytes(d.totalBytes || d.receivedBytes);
+    if (d.state === 'cancelled') return t('downloads.cancelled');
+    if (d.state === 'interrupted') return d.paused ? t('downloads.paused') : t('downloads.interrupted');
+    if (d.paused) return t('downloads.paused');
     if (d.totalBytes > 0) {
       var pct = Math.min(100, Math.floor(d.receivedBytes * 100 / d.totalBytes));
       return pct + '% · ' + fmtBytes(d.speed) + '/s · ' + fmtBytes(d.receivedBytes) + '/' + fmtBytes(d.totalBytes);
@@ -2147,7 +2681,7 @@ function renderWebAppDownloadsHtml() {
 
       var name = document.createElement('div');
       name.className = 'name';
-      name.textContent = d.filename || '未命名文件';
+      name.textContent = d.filename || t('downloads.untitled');
       name.title = d.filename || '';
 
       var bar = document.createElement('div');
@@ -2166,15 +2700,15 @@ function renderWebAppDownloadsHtml() {
       var ops = document.createElement('div');
       ops.className = 'ops';
       if (isActive(d)) {
-        if (d.paused || d.state === 'interrupted') ops.appendChild(makeButton('继续', 'resume', d.id));
-        else ops.appendChild(makeButton('暂停', 'pause', d.id));
-        ops.appendChild(makeButton('取消', 'cancel', d.id));
+        if (d.paused || d.state === 'interrupted') ops.appendChild(makeButton(t('downloads.resume'), 'resume', d.id));
+        else ops.appendChild(makeButton(t('downloads.pause'), 'pause', d.id));
+        ops.appendChild(makeButton(t('downloads.cancel'), 'cancel', d.id));
       } else {
         if (d.savePath) {
-          ops.appendChild(makeButton('打开文件夹', 'open-folder', d.id, true));
-          if (d.state === 'completed') ops.appendChild(makeButton('打开', 'open-file', d.id));
+          ops.appendChild(makeButton(t('downloads.openFolder'), 'open-folder', d.id, true));
+          if (d.state === 'completed') ops.appendChild(makeButton(t('downloads.openFile'), 'open-file', d.id));
         }
-        ops.appendChild(makeButton('移除', 'remove', d.id));
+        ops.appendChild(makeButton(t('downloads.remove'), 'remove', d.id));
       }
 
       row.appendChild(name);
@@ -2202,9 +2736,247 @@ function renderWebAppDownloadsHtml() {
 }
 
 /**
+ * 渲染设置窗口 HTML（独立非模态子窗口）
+ * 三段：页面缩放 / 快捷键 / 关于
+ */
+function renderWebAppSettingsHtml() {
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa; color: #303133; user-select: none;
+  }
+  body { display: flex; flex-direction: column; }
+  .header { padding: 18px 22px 4px; font-size: 18px; font-weight: 600; }
+  .body { flex: 1; overflow-y: auto; padding: 0 22px 18px; }
+  .section {
+    background: #ffffff; border: 1px solid #ebeef5; border-radius: 8px;
+    margin-top: 14px; overflow: hidden;
+  }
+  .section-title {
+    padding: 12px 16px; font-size: 15.5px; font-weight: 600;
+    border-bottom: 1px solid #f5f7fa;
+  }
+  .section-body { padding: 16px; }
+  .zoom-block + .zoom-block {
+    margin-top: 16px; padding-top: 14px; border-top: 1px dashed #ebeef5;
+  }
+  .zoom-label { font-size: 14px; color: #606266; margin-bottom: 8px; }
+  .zoom-row { display: flex; align-items: center; gap: 14px; }
+  input[type=range] { flex: 1; accent-color: #409eff; }
+  .zoom-value {
+    min-width: 62px; text-align: right; font-size: 15.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .btn {
+    border: 1px solid #dcdfe6; background: #ffffff; color: #606266;
+    font-size: 14.4px; padding: 5px 12px; border-radius: 4px; cursor: pointer;
+  }
+  .btn:hover { color: #409eff; border-color: #c6e2ff; background: #ecf5ff; }
+  .hint { margin-top: 8px; font-size: 14.4px; color: #909399; line-height: 1.5; }
+  /* 快捷键按窗口宽度自适应列数：窄 1 列、默认 2 列、更宽 3~4 列 */
+  #shortcutList {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 0 18px;
+  }
+  .group-title {
+    grid-column: 1 / -1; font-size: 14.4px; color: #909399;
+    margin: 12px 0 2px;
+  }
+  .group-title:first-child { margin-top: 0; }
+  .shortcut-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 7px 0; border-bottom: 1px dashed #f0f2f5; font-size: 15px;
+  }
+  .shortcut-item:last-child { border-bottom: none; }
+  .keys {
+    flex-shrink: 0; font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 13.5px; color: #606266; background: #f5f7fa;
+    border: 1px solid #ebeef5; border-radius: 4px; padding: 1px 7px; white-space: nowrap;
+  }
+  .about-row {
+    display: flex; gap: 12px; padding: 7px 0;
+    border-bottom: 1px dashed #f0f2f5; font-size: 15px;
+  }
+  .about-row:last-child { border-bottom: none; }
+  .about-label { width: 125px; flex-shrink: 0; color: #909399; }
+  .about-value { flex: 1; word-break: break-all; }
+  .footer {
+    flex-shrink: 0; padding: 12px 22px; display: flex; justify-content: flex-end;
+    border-top: 1px solid #ebeef5; background: #ffffff;
+  }
+</style>
+</head>
+<body>
+  <div class="header" id="title"></div>
+  <div class="body">
+    <div class="section">
+      <div class="section-title" id="zoomTitle"></div>
+      <div class="section-body">
+        <div class="zoom-block">
+          <div class="zoom-label" id="pageZoomLabel"></div>
+          <div class="zoom-row">
+            <input type="range" id="zoomRange" min="50" max="250" step="10">
+            <span class="zoom-value" id="zoomValue">100%</span>
+            <button class="btn" id="zoomReset"></button>
+          </div>
+          <div class="hint" id="zoomHint"></div>
+        </div>
+        <div class="zoom-block">
+          <div class="zoom-label" id="windowZoomLabel"></div>
+          <div class="zoom-row">
+            <input type="range" id="windowZoomRange" min="50" max="250" step="10">
+            <span class="zoom-value" id="windowZoomValue">100%</span>
+            <button class="btn" id="windowZoomReset"></button>
+          </div>
+          <div class="hint" id="windowZoomHint"></div>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title" id="shortcutsTitle"></div>
+      <div class="section-body" id="shortcutList"></div>
+    </div>
+    <div class="section">
+      <div class="section-title" id="aboutTitle"></div>
+      <div class="section-body" id="aboutList"></div>
+    </div>
+  </div>
+  <div class="footer">
+    <button class="btn" id="closeBtn"></button>
+  </div>
+<script>
+  var t = function (key) { return window.i18n ? window.i18n.t(key) : key; };
+  var zoomRange = document.getElementById('zoomRange');
+  var zoomValue = document.getElementById('zoomValue');
+  var windowZoomRange = document.getElementById('windowZoomRange');
+  var windowZoomValue = document.getElementById('windowZoomValue');
+
+  function setZoomUI(factor) {
+    var pct = Math.round((Number(factor) || 1) * 100);
+    zoomRange.value = String(pct);
+    zoomValue.textContent = pct + '%';
+  }
+
+  function setWindowZoomUI(factor) {
+    var pct = Math.round((Number(factor) || 1) * 100);
+    windowZoomRange.value = String(pct);
+    windowZoomValue.textContent = pct + '%';
+  }
+
+  function renderShortcuts(list) {
+    var groups = [
+      { id: 'page', title: t('settings.group.page') },
+      { id: 'tab', title: t('settings.group.tab') },
+      { id: 'window', title: t('settings.group.window') }
+    ];
+    var box = document.getElementById('shortcutList');
+    box.innerHTML = '';
+    groups.forEach(function (g) {
+      var items = (list || []).filter(function (s) { return s.group === g.id; });
+      if (!items.length) return;
+      var groupTitle = document.createElement('div');
+      groupTitle.className = 'group-title';
+      groupTitle.textContent = g.title;
+      box.appendChild(groupTitle);
+      items.forEach(function (s) {
+        var row = document.createElement('div');
+        row.className = 'shortcut-item';
+        var desc = document.createElement('span');
+        desc.textContent = s.label;
+        var keys = document.createElement('span');
+        keys.className = 'keys';
+        keys.textContent = s.keys;
+        row.appendChild(desc);
+        row.appendChild(keys);
+        box.appendChild(row);
+      });
+    });
+  }
+
+  function renderAbout(info) {
+    var rows = [
+      ['settings.about.name', info.name],
+      ['settings.about.url', info.url],
+      ['settings.about.appId', info.appId],
+      ['settings.about.shellVersion', 'v' + info.shellVersion],
+      ['settings.about.appVersion', info.appVersion],
+      ['settings.about.electron', info.electron],
+      ['settings.about.chrome', info.chrome]
+    ];
+    var box = document.getElementById('aboutList');
+    box.innerHTML = '';
+    rows.forEach(function (r) {
+      var row = document.createElement('div');
+      row.className = 'about-row';
+      var label = document.createElement('span');
+      label.className = 'about-label';
+      label.textContent = t(r[0]);
+      var value = document.createElement('span');
+      value.className = 'about-value';
+      value.textContent = (r[1] === undefined || r[1] === null || r[1] === '') ? '-' : String(r[1]);
+      row.appendChild(label);
+      row.appendChild(value);
+      box.appendChild(row);
+    });
+  }
+
+  document.getElementById('title').textContent = t('settings.title');
+  document.getElementById('zoomTitle').textContent = t('settings.zoomTitle');
+  document.getElementById('pageZoomLabel').textContent = t('settings.pageZoomLabel');
+  document.getElementById('zoomHint').textContent = t('settings.zoomHint');
+  document.getElementById('windowZoomLabel').textContent = t('settings.windowZoomLabel');
+  document.getElementById('windowZoomHint').textContent = t('settings.windowZoomHint');
+  document.getElementById('shortcutsTitle').textContent = t('settings.shortcutsTitle');
+  document.getElementById('aboutTitle').textContent = t('settings.aboutTitle');
+  document.getElementById('zoomReset').textContent = t('settings.reset');
+  document.getElementById('windowZoomReset').textContent = t('settings.reset');
+  document.getElementById('closeBtn').textContent = t('settings.close');
+
+  if (window.settings) {
+    window.settings.getZoom().then(setZoomUI).catch(function () {});
+    window.settings.onZoomChanged(setZoomUI);
+    window.settings.getWindowZoom().then(setWindowZoomUI).catch(function () {});
+    window.settings.onWindowZoomChanged(setWindowZoomUI);
+    window.settings.getShortcuts().then(renderShortcuts).catch(function () {});
+    window.settings.getInfo().then(renderAbout).catch(function () {});
+  }
+
+  zoomRange.addEventListener('input', function () {
+    var pct = Number(zoomRange.value) || 100;
+    zoomValue.textContent = pct + '%';
+    if (window.settings) window.settings.setZoom(pct / 100);
+  });
+  document.getElementById('zoomReset').addEventListener('click', function () {
+    if (window.settings) window.settings.resetZoom();
+  });
+  windowZoomRange.addEventListener('input', function () {
+    var pct = Number(windowZoomRange.value) || 100;
+    windowZoomValue.textContent = pct + '%';
+    if (window.settings) window.settings.setWindowZoom(pct / 100);
+  });
+  document.getElementById('windowZoomReset').addEventListener('click', function () {
+    if (window.settings) window.settings.resetWindowZoom();
+  });
+  document.getElementById('closeBtn').addEventListener('click', function () {
+    if (window.settings) window.settings.close();
+  });
+</script>
+</body>
+</html>
+`;
+}
+
+/**
  * 网页应用外壳版本
  *
- * 网页应用的外壳（main.js / tabbar / preload / downloads / fab）在创建或编辑时
+ * 网页应用的外壳（main.js / tabbar / preload / downloads / fab / settings）在创建或编辑时
  * 由本模块渲染并打包进 app.asar，之后不会随 manager 升级自动更新。
  * 因此在 .canbox-app 中记录 shellVersion，用于识别旧外壳并引导用户升级。
  *
@@ -2212,7 +2984,7 @@ function renderWebAppDownloadsHtml() {
  * 并在 WEBAPP_SHELL_RELEASES 追加该版本的 notes（i18n key，位于 webApp.shellNotes.*）。
  * 注意：.canbox-app 的 version 字段是文件格式版本，与外壳版本无关，不要混用。
  */
-const WEBAPP_SHELL_VERSION = 4;
+const WEBAPP_SHELL_VERSION = 5;
 const WEBAPP_SHELL_RELEASES = [
     {
         version: 2,
@@ -2225,6 +2997,10 @@ const WEBAPP_SHELL_RELEASES = [
     {
         version: 4,
         notes: ['popupTabFastOpen']
+    },
+    {
+        version: 5,
+        notes: ['settingsWindow', 'shortcutsWithoutMenu', 'shellI18n']
     }
 ];
 
@@ -2386,6 +3162,9 @@ function buildWebAppSources(appId, config) {
 
     // fab.html（可拖动的下载浮动按钮）
     fs.writeFileSync(path.join(stagingDir, 'fab.html'), renderWebAppFabHtml(), 'utf-8');
+
+    // settings.html（设置窗口）
+    fs.writeFileSync(path.join(stagingDir, 'settings.html'), renderWebAppSettingsHtml(), 'utf-8');
 
     return { stagingDir, pkgContent };
 }
@@ -2551,7 +3330,7 @@ async function editWebApp(appId, config) {
 
         // 清理旧实现遗留的散落源码文件（旧版本直接写在 apps/{appId}/ 根目录，现已收进 app.asar）
         const originalFs = require('original-fs');
-        for (const name of ['main.js', 'tabbar.html', 'preload.js', 'downloads.html', 'fab.html']) {
+        for (const name of ['main.js', 'tabbar.html', 'preload.js', 'downloads.html', 'fab.html', 'settings.html']) {
             const loosePath = path.join(destPath, name);
             if (originalFs.existsSync(loosePath)) {
                 originalFs.rmSync(loosePath, { force: true });
