@@ -21,7 +21,10 @@ const { parseRepo, getRawUrl, getRepoContext, GITHUB_MIRRORS } = require('./repo
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) Canbox/0.1.0';
 const REQUEST_TIMEOUT = 20000;
-const CATALOG_SCHEMA_VERSION = 2;
+// catalog 数据契约兼容区间：v3 起展示分片新增 platforms 字段（可选字段，缺省视为全平台），
+// 因此 v2/v3 数据都能正常展示；超出区间说明契约已破坏性变更，需升级客户端。
+const CATALOG_SCHEMA_VERSION_MIN = 2;
+const CATALOG_SCHEMA_VERSION_MAX = 3;
 const MAX_SHARDS_WARN = 20;
 
 // 自动刷新周期：检查走 ETag 条件请求，无变化时只有 1 个 catalog.json 请求。
@@ -331,8 +334,11 @@ async function fetchCatalog(sourceId, options = {}) {
     if (!catalog || typeof catalog !== 'object' || !Array.isArray(catalog.shards)) {
         throw new Error('catalog.json 格式无效');
     }
-    if (catalog.schemaVersion !== CATALOG_SCHEMA_VERSION) {
-        throw new Error(`数据格式版本不兼容（需要 v${CATALOG_SCHEMA_VERSION}，得到 v${catalog.schemaVersion}）`);
+    const schemaVersion = Number(catalog.schemaVersion);
+    if (!Number.isInteger(schemaVersion) ||
+        schemaVersion < CATALOG_SCHEMA_VERSION_MIN ||
+        schemaVersion > CATALOG_SCHEMA_VERSION_MAX) {
+        throw new Error(`数据格式版本不兼容（支持 v${CATALOG_SCHEMA_VERSION_MIN}~v${CATALOG_SCHEMA_VERSION_MAX}，得到 v${catalog.schemaVersion}）`);
     }
 
     const tooManyShards = catalog.totalShards > MAX_SHARDS_WARN;
