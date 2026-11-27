@@ -4,6 +4,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.4.1] - 2026-11-27
+
+### feat | 新功能 / Features
+
+catalog 数据契约改为兼容区间校验（v2~v3），修复 GitHub 官方源数据升级到 v3 后应用仓库报“数据格式版本不兼容”
+v3 数据源自动启用系统筛选（platforms 字段），v2 数据源与本地旧缓存的展示不受影响
+
+Catalog schema validation now accepts a v2–v3 range, fixing the "incompatible data format version" error in the app store after the official GitHub source moved to v3
+Sources on v3 enable OS filtering through the platforms field, while v2 sources and existing local caches keep working unchanged
+
+### chore | 维护 / Maintenance
+
+版本号升级至 0.4.1
+
+Bump the version to 0.4.1
+
 ## [0.4.0] - 2026-11-27
 
 ### feat | 新功能 / Features
