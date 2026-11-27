@@ -4,6 +4,40 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [0.4.0] - 2026-11-27
+
+### feat | 新功能 / Features
+
+新增网页应用设置窗口（Ctrl+,）：支持页面缩放、独立的设置窗口缩放、全部快捷键说明和关于信息
+设置窗口会记住上次的位置与尺寸，禁止最大化，并放大了界面字号
+未启用菜单栏的网页应用在窗口右上角显示齿轮按钮，可随时打开设置
+网页应用外壳的菜单开关不再影响快捷键，刷新、前进/后退、全屏等在无菜单时同样可用
+网页应用缩放统一作用于所有标签页并持久保存，设置窗口缩放独立保存
+网页应用外壳界面（菜单、标签栏、下载面板、设置窗口）跟随系统语言显示中文或英文
+设置窗口的快捷键列表按可用宽度自动调整为 1 至 4 列
+网页应用外壳版本升级至 v6，已创建的应用可在 manager 中升级外壳获得以上能力
+
+Add a settings window (Ctrl+,) for web apps, with page zoom, independent settings-window zoom, a full shortcut reference and about info
+The settings window remembers its last position and size, cannot be maximized, and uses a larger UI font
+Web apps without a menu bar now show a gear button in the top-right corner that opens settings
+Toggling the menu bar no longer disables shortcuts; reload, back/forward and full screen keep working without a menu
+Web app zoom applies to all tabs and persists, while the settings-window zoom is stored independently
+The web app shell UI (menu, tab bar, downloads panel, settings) follows the system language (Chinese or English)
+The shortcut list in settings automatically reflows between 1 and 4 columns based on available width
+The web app shell version is bumped to v6; existing apps can upgrade the shell in manager to get these capabilities
+
+### fix | 问题修复 / Bug Fixes
+
+修复刷新快捷键在焦点位于下载面板时刷新错误对象、切换标签页后缩放值不同步的问题
+
+Fix reload affecting the downloads panel instead of the current page, and zoom getting out of sync after switching tabs
+
+### chore | 维护 / Maintenance
+
+版本号升级至 0.4.0
+
+Bump the version to 0.4.0
+
 ## [0.3.9] - 2026-11-26
 
 ### feat | 新功能 / Features
