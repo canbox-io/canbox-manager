@@ -363,7 +363,9 @@
             "popupTabFastOpen": "New tabs opened from links inside a page now appear instantly, without noticeable delay",
             "settingsWindow": "New settings window (Ctrl+,): adjust page zoom, view all shortcuts, and check app and shell versions",
             "shortcutsWithoutMenu": "Reload, back/forward, full screen and other shortcuts now work with the menu bar hidden",
-            "shellI18n": "The shell UI (menu, tab bar, downloads panel, settings) follows the system language (Chinese or English)"
+            "shellI18n": "The shell UI (menu, tab bar, downloads panel, settings) follows the system language (Chinese or English)",
+            "settingsGear": "A gear button in the top-right corner opens the settings window when the menu bar is disabled",
+            "settingsWindowState": "The settings window remembers its last position and size, and cannot be maximized"
         }
     }
 }

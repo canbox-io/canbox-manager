@@ -1075,6 +1075,7 @@ const WEBAPP_SHELL_MESSAGES = {
         'shortcut.wheelKeys': 'Ctrl + 滚轮',
         'shortcut.wheel': '缩放页面并同步到所有标签页',
         'settings.title': '设置',
+        'settings.gearTooltip': '设置 (Ctrl+,)',
         'settings.zoomTitle': '缩放',
         'settings.pageZoomLabel': '网页缩放',
         'settings.zoomHint': '调整会应用到所有标签页，并在下次启动时保留。',
@@ -1149,6 +1150,7 @@ const WEBAPP_SHELL_MESSAGES = {
         'shortcut.wheelKeys': 'Ctrl + Wheel',
         'shortcut.wheel': 'Zoom the page and sync it to all tabs',
         'settings.title': 'Settings',
+        'settings.gearTooltip': 'Settings (Ctrl+,)',
         'settings.zoomTitle': 'Zoom',
         'settings.pageZoomLabel': 'Page zoom',
         'settings.zoomHint': 'Applies to all tabs and is kept for the next launch.',
@@ -1227,6 +1229,8 @@ const APP_ID = '${appId}';
 const APP_NAME = ${nameJson};
 const APP_URL = ${urlJson};
 const SHELL_VERSION = ${WEBAPP_SHELL_VERSION};
+// 无菜单时在右上角显示齿轮设置入口
+const SHOW_SETTINGS_GEAR = ${!menuBar};
 
 const SHELL_MESSAGES = ${JSON.stringify(WEBAPP_SHELL_MESSAGES)};
 let SHELL_LOCALE = 'zh-CN';
@@ -1297,6 +1301,10 @@ let fabView = null;
 let fabVisible = false;
 let fabPos = null;
 let fabDragStart = null;
+
+// 右上角固定齿轮按钮（仅在无菜单时显示）
+const GEAR_SIZE = 36;
+let gearView = null;
 
 // 窗口状态文件
 const stateFile = path.join(app.getPath('userData'), 'window-state.json');
@@ -1373,6 +1381,8 @@ function layoutViews() {
             t.view.setBounds({ x: -99999, y: -99999, width: 100, height: 100 });
         }
     }
+    // 齿轮固定在右上角：叠在页面与标签栏之上，但位于下载面板之下
+    layoutGear();
     // 下载面板始终位于最上层（切换/新建标签页会把页面视图提到前面）
     if (panelOpen && panelView && !panelView.webContents.isDestroyed()) {
         win.contentView.removeChildView(panelView);
@@ -1381,6 +1391,37 @@ function layoutViews() {
     }
     // 浮动按钮再叠在面板之上，保证随时可点击
     layoutFab();
+}
+
+// ====== 右上角设置齿轮（无菜单时的设置入口） ======
+
+function ensureGearView() {
+    if (gearView && !gearView.webContents.isDestroyed()) return gearView;
+    gearView = new WebContentsView({
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+    gearView.setBackgroundColor('#00000000');
+    gearView.webContents.loadFile(path.join(__dirname, 'gear.html'));
+    return gearView;
+}
+
+function layoutGear() {
+    if (!SHOW_SETTINGS_GEAR || !win || win.isDestroyed()) return;
+    ensureGearView();
+    if (!gearView || gearView.webContents.isDestroyed()) return;
+    const [w] = win.getContentSize();
+    win.contentView.removeChildView(gearView);
+    win.contentView.addChildView(gearView);
+    gearView.setBounds({
+        x: Math.max(8, w - GEAR_SIZE - 10),
+        y: 10,
+        width: GEAR_SIZE,
+        height: GEAR_SIZE
+    });
 }
 
 function activeIndex() { return tabs.findIndex(t => t.id === activeTabId); }
@@ -2178,6 +2219,7 @@ ipcMain.handle('settings:reset-window-zoom', () => { setSettingsZoom(1); return 
 ipcMain.handle('settings:close', () => {
     if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
 });
+ipcMain.handle('settings:open', () => { openSettings(); });
 
 ipcMain.handle('tab:get', () => tabs.map((t, i) => ({
     id: t.id, title: t.title, url: t.url,
@@ -2247,8 +2289,11 @@ app.on('window-all-closed', () => app.quit());
 
 /**
  * 渲染生成的 tabbar.html（editbox 风格标签栏）
+ * @param {Object} [options]
+ * @param {boolean} [options.reserveRight] 右侧是否给设置齿轮留出空间
  */
-function renderWebAppTabbarHtml() {
+function renderWebAppTabbarHtml(options) {
+    const reserveRight = !!(options && options.reserveRight);
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -2262,7 +2307,7 @@ function renderWebAppTabbarHtml() {
   }
   .tab-bar {
     display: flex; align-items: flex-end;
-    height: 52.5px; padding: 0 8px; gap: 2px;
+    height: 52.5px; padding: ${reserveRight ? '0 54px 0 8px' : '0 8px'}; gap: 2px;
     background: #e4e7ed;
     overflow: hidden;
     position: relative;
@@ -2413,6 +2458,7 @@ contextBridge.exposeInMainWorld('settings', {
     getWindowZoom: () => ipcRenderer.invoke('settings:get-window-zoom'),
     setWindowZoom: (factor) => ipcRenderer.invoke('settings:set-window-zoom', factor),
     resetWindowZoom: () => ipcRenderer.invoke('settings:reset-window-zoom'),
+    open: () => ipcRenderer.invoke('settings:open'),
     close: () => ipcRenderer.invoke('settings:close'),
     onZoomChanged: (cb) => ipcRenderer.on('settings:zoomChanged', (_e, factor) => cb(factor)),
     onWindowZoomChanged: (cb) => ipcRenderer.on('settings:windowZoomChanged', (_e, factor) => cb(factor))
@@ -2974,6 +3020,51 @@ function renderWebAppSettingsHtml() {
 }
 
 /**
+ * 渲染右上角设置齿轮（无菜单时的设置入口，独立透明 WebContentsView）
+ */
+function renderWebAppGearHtml() {
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  .gear {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #606266; background: rgba(255, 255, 255, 0.72);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    cursor: pointer; opacity: 0.62;
+    transition: opacity 0.12s, transform 0.12s, background 0.12s, color 0.12s;
+  }
+  .gear:hover { opacity: 1; transform: scale(1.06); background: #ffffff; color: #409eff; }
+  .gear:active { transform: scale(0.96); }
+  .gear svg { width: 19px; height: 19px; }
+</style>
+</head>
+<body>
+  <div class="gear" id="gear">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </svg>
+  </div>
+<script>
+  var gearEl = document.getElementById('gear');
+  var t = function (key) { return window.i18n ? window.i18n.t(key) : key; };
+  gearEl.title = t('settings.gearTooltip');
+  gearEl.addEventListener('click', function () {
+    if (window.settings) window.settings.open();
+  });
+</script>
+</body>
+</html>
+`;
+}
+
+/**
  * 网页应用外壳版本
  *
  * 网页应用的外壳（main.js / tabbar / preload / downloads / fab / settings）在创建或编辑时
@@ -2984,7 +3075,7 @@ function renderWebAppSettingsHtml() {
  * 并在 WEBAPP_SHELL_RELEASES 追加该版本的 notes（i18n key，位于 webApp.shellNotes.*）。
  * 注意：.canbox-app 的 version 字段是文件格式版本，与外壳版本无关，不要混用。
  */
-const WEBAPP_SHELL_VERSION = 5;
+const WEBAPP_SHELL_VERSION = 6;
 const WEBAPP_SHELL_RELEASES = [
     {
         version: 2,
@@ -3001,6 +3092,10 @@ const WEBAPP_SHELL_RELEASES = [
     {
         version: 5,
         notes: ['settingsWindow', 'shortcutsWithoutMenu', 'shellI18n']
+    },
+    {
+        version: 6,
+        notes: ['settingsGear', 'settingsWindowState']
     }
 ];
 
@@ -3151,8 +3246,10 @@ function buildWebAppSources(appId, config) {
     });
     fs.writeFileSync(path.join(stagingDir, 'main.js'), mainJsContent, 'utf-8');
 
-    // tabbar.html（标签栏 UI）
-    fs.writeFileSync(path.join(stagingDir, 'tabbar.html'), renderWebAppTabbarHtml(), 'utf-8');
+    // tabbar.html（标签栏 UI）：无菜单时右侧给设置齿轮留出空间
+    fs.writeFileSync(path.join(stagingDir, 'tabbar.html'), renderWebAppTabbarHtml({
+        reserveRight: config.menuBar === false
+    }), 'utf-8');
 
     // preload.js（标签栏窗口的 preload）
     fs.writeFileSync(path.join(stagingDir, 'preload.js'), renderWebAppPreload(), 'utf-8');
@@ -3165,6 +3262,9 @@ function buildWebAppSources(appId, config) {
 
     // settings.html（设置窗口）
     fs.writeFileSync(path.join(stagingDir, 'settings.html'), renderWebAppSettingsHtml(), 'utf-8');
+
+    // gear.html（无菜单时右上角的设置入口）
+    fs.writeFileSync(path.join(stagingDir, 'gear.html'), renderWebAppGearHtml(), 'utf-8');
 
     return { stagingDir, pkgContent };
 }
@@ -3330,7 +3430,7 @@ async function editWebApp(appId, config) {
 
         // 清理旧实现遗留的散落源码文件（旧版本直接写在 apps/{appId}/ 根目录，现已收进 app.asar）
         const originalFs = require('original-fs');
-        for (const name of ['main.js', 'tabbar.html', 'preload.js', 'downloads.html', 'fab.html', 'settings.html']) {
+        for (const name of ['main.js', 'tabbar.html', 'preload.js', 'downloads.html', 'fab.html', 'settings.html', 'gear.html']) {
             const loosePath = path.join(destPath, name);
             if (originalFs.existsSync(loosePath)) {
                 originalFs.rmSync(loosePath, { force: true });

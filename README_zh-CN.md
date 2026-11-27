@@ -87,6 +87,7 @@ electron -r canbox-core/injection.js canbox-manager/ --app-id=canbox-manager --n
   - Ctrl+W：关闭标签页；Ctrl+Q：退出；F11：全屏；F12：开发者工具
   - Ctrl+,：打开设置窗口
 - 设置窗口（`settings.html`，独立非模态子窗口）：页面缩放、全部快捷键说明、关于（应用名称 / 网址 / 应用 ID / 外壳版本 / Electron / Chromium）
+- 未启用菜单栏时，窗口右上角显示半透明齿轮按钮（`gear.html`），点击打开设置窗口，与 Ctrl+, 等效
 - 外壳界面（菜单、标签栏、下载面板、设置窗口）跟随系统语言显示中文或英文
 - PWA 的 Service Worker / 离线缓存等能力由 Chromium 内核原生支持，无需额外代码
 

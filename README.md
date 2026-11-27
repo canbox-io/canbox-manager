@@ -87,6 +87,7 @@ Wrap any URL as a desktop app — no canbox-core injection, its own userData, fu
   - Ctrl+W: close tab; Ctrl+Q: quit; F11: full screen; F12: developer tools
   - Ctrl+,: open the settings window
 - Settings window (`settings.html`, a separate non-modal child window): page zoom, full shortcut reference, and About (app name / URL / app ID / shell version / Electron / Chromium)
+- With the menu bar disabled, a translucent gear button (`gear.html`) appears in the top-right corner and opens the settings window, equivalent to Ctrl+,
 - The shell UI (menu, tab bar, downloads panel, settings) follows the system language (Chinese or English)
 - PWA features such as Service Worker / offline cache are natively supported by Chromium — no extra code needed
 
